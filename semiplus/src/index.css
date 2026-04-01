@@ -1,0 +1,125 @@
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+@import "tailwindcss";
+
+/* ── Tailwind v4 테마 토큰 정의 ─────────────────── */
+@theme {
+  /* 딥 네이비 팔레트 */
+  --color-navy-950: #050A14;
+  --color-navy-900: #0F172A;
+  --color-navy-800: #1A253D;
+  --color-navy-700: #1E2E4A;
+  --color-navy-600: #263554;
+  --color-navy-500: #2E3F61;
+
+  /* 브랜드 인디고 */
+  --color-brand-50:  #EEF2FF;
+  --color-brand-100: #E0E7FF;
+  --color-brand-200: #C7D2FE;
+  --color-brand-300: #A5B4FC;
+  --color-brand-400: #818CF8;
+  --color-brand-500: #6366F1;
+  --color-brand-600: #4F46E5;
+  --color-brand-700: #4338CA;
+  --color-brand-800: #3730A3;
+  --color-brand-900: #312E81;
+
+  /* 시맨틱 상태 색상 (PRD 기반) */
+  --color-status-draft:    #808080;
+  --color-status-approved: #28A745;
+  --color-status-rejected: #DC3545;
+  --color-status-progress: #0EA5E9;
+  --color-status-pending:  #F59E0B;
+
+  /* 서피스 */
+  --color-surface-base:  #F8FAFC;
+  --color-surface-card:  #FFFFFF;
+  --color-surface-hover: #F1F5F9;
+
+  /* 그림자 */
+  --shadow-card:    0 1px 3px 0 rgba(0,0,0,0.06), 0 1px 2px -1px rgba(0,0,0,0.04);
+  --shadow-card-md: 0 4px 12px 0 rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.04);
+  --shadow-card-lg: 0 8px 24px 0 rgba(0,0,0,0.10), 0 4px 8px -4px rgba(0,0,0,0.06);
+  --shadow-glow:    0 0 20px rgba(99,102,241,0.25);
+  --shadow-glow-sm: 0 0 10px rgba(99,102,241,0.20);
+
+  /* 애니메이션 */
+  --animate-fade-in:   fadeIn 0.2s ease-out;
+  --animate-slide-up:  slideUp 0.25s ease-out;
+  --animate-gradient:  gradientShift 8s ease infinite;
+
+  /* 폰트 */
+  --font-family-sans: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+
+  @keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
+  @keyframes gradientShift {
+    0%, 100% { background-position: 0% 50% }
+    50%       { background-position: 100% 50% }
+  }
+}
+
+/* ── CSS 변수 디자인 토큰 ─────────────────────────── */
+:root {
+  --sp-navy-900: #0F172A;
+  --sp-brand:    #6366F1;
+  --sp-surface:  #F1F5F9;
+  --sp-card:     #FFFFFF;
+  --sp-border:   #E2E8F0;
+  --sp-gnb-height: 60px;
+  --sp-lnb-width:  220px;
+}
+
+/* ── 기본 타이포그래피 ──────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  font-family: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #0F172A;
+  background-color: var(--sp-surface);
+}
+
+/* ── AG Grid 폰트 오버라이드 ─────────────────────── */
+.ag-theme-quartz {
+  --ag-font-family: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', system-ui, sans-serif;
+  --ag-font-size: 13px;
+}
+
+/* ── 스크롤바 ────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+/* ── 커스텀 유틸리티 ──────────────────────────────── */
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #818CF8 0%, #6366F1 50%, #4F46E5 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .card-hover {
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+    transform: translateY(-1px);
+  }
+}
