@@ -1,8 +1,7 @@
-import React, { useState } from 'react'
-import { Zap, AlertTriangle, Info } from 'lucide-react'
+import React from 'react'
+import { AlertTriangle, Info } from 'lucide-react'
 import { useLayoutEditorStore } from '../../stores/layoutEditorStore'
 import type { Equipment } from '../../types'
-import toast from 'react-hot-toast'
 
 interface Props {
   equipment: Equipment[]
@@ -18,7 +17,6 @@ const investLabel: Record<string, string> = {
 
 export const PropertiesPanel: React.FC<Props> = ({ equipment }) => {
   const { selectedEquipmentIds, placements } = useLayoutEditorStore()
-  const [isOptimizing, setIsOptimizing] = useState(false)
 
   const selectedId = selectedEquipmentIds[0]
   const selectedEq = equipment.find(e => e.id === selectedId)
@@ -30,14 +28,6 @@ export const PropertiesPanel: React.FC<Props> = ({ equipment }) => {
     .filter(Boolean) as Equipment[]
   const occupiedArea = placedEq.reduce((sum, e) =>
     sum + ((e.width_mm + e.maintenance_space_mm) * (e.depth_mm + e.maintenance_space_mm)) / 1_000_000, 0)
-
-  const handleOptimize = async () => {
-    setIsOptimizing(true)
-    toast.loading('최적화 분석 중...', { id: 'optimize' })
-    await new Promise(r => setTimeout(r, 2000))
-    setIsOptimizing(false)
-    toast.success('최적화 결과가 L7 레이어에 표시되었습니다.', { id: 'optimize' })
-  }
 
   return (
     <div className="flex flex-col h-full bg-white border-l border-gray-200 overflow-y-auto">
@@ -57,19 +47,6 @@ export const PropertiesPanel: React.FC<Props> = ({ equipment }) => {
             <p className="text-sm font-bold text-gray-800">{placements.length}대</p>
           </div>
         </div>
-      </div>
-
-      {/* Optimize Button */}
-      <div className="p-3 border-b border-gray-100">
-        <button
-          onClick={handleOptimize}
-          disabled={isOptimizing || placements.length === 0}
-          className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <Zap size={16} />
-          {isOptimizing ? '분석 중...' : '최적화 실행'}
-        </button>
-        <p className="text-xs text-gray-400 mt-1.5 text-center">결과는 L7 레이어에 표시됩니다</p>
       </div>
 
       {/* Selected Equipment Properties */}

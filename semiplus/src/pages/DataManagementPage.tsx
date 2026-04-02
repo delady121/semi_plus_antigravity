@@ -1,273 +1,227 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { AgGridReact } from 'ag-grid-react'
-import type { ColDef, GridApi, GetContextMenuItemsParams, MenuItemDef, DefaultMenuItem } from 'ag-grid-community'
-import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'
-import { Plus, Columns, Upload, RefreshCw } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Plus, Database, Layers, Link2, Trash2, Settings } from 'lucide-react'
 import { PageLayout } from '../components/layout/PageLayout'
-import { mockService } from '../services/mockData'
-import type { Equipment } from '../types'
+import { useDataTableStore } from '../stores/dataTableStore'
+import { buildSourceDataMap } from '../services/dataTableService'
+import { CreateTableModal } from '../components/data/CreateTableModal'
+import { OriginTableViewer } from '../components/data/OriginTableViewer'
+import { ApiTableViewer } from '../components/data/ApiTableViewer'
+import { CombinedTableViewer } from '../components/data/CombinedTableViewer'
+import type { CustomTable, TableChangeRecord } from '../types'
 import toast from 'react-hot-toast'
 
-ModuleRegistry.registerModules([AllCommunityModule])
-
-const TABLE_OPTIONS = [
-  { value: 'equipment', label: '설비 마스터' },
-  { value: 'bays', label: 'FAB Bay' },
-]
-
-const statusLabel: Record<string, string> = {
-  OPERATING: '운영중', PLANNED_IN: '반입예정', PLANNED_OUT: '반출예정', REMOVED: '반출완료'
+const TYPE_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  ORIGIN:       { label: '직접 생성', color: 'text-emerald-600 bg-emerald-50 border-emerald-200', icon: <Layers size={12} /> },
+  API_CONNECTED:{ label: '사내 데이터', color: 'text-blue-600 bg-blue-50 border-blue-200',       icon: <Database size={12} /> },
+  COMBINED:     { label: '조합 테이블', color: 'text-purple-600 bg-purple-50 border-purple-200', icon: <Link2 size={12} /> },
 }
-const investLabel: Record<string, string> = {
-  NEW: '신규', EXPANSION: '증설', REPLACEMENT: '교체', RELOCATION: '이전'
-}
-
-const bayLabel: Record<string, string> = { bay1: 'A동 1층', bay2: 'A동 2층', bay3: 'B동 1층' }
 
 export const DataManagementPage: React.FC = () => {
-  const [selectedTable, setSelectedTable] = useState('equipment')
-  const [rowData, setRowData] = useState<Equipment[]>([])
-  const [selectedRows, setSelectedRows] = useState<Equipment[]>([])
-  const [lastModified, setLastModified] = useState<string | null>(null)
-  const gridApiRef = useRef<GridApi | null>(null)
+  const { tables, addTable, deleteTable, saveRows, updateTable } = useDataTableStore()
+  const [selectedId, setSelectedId] = useState<string | null>(tables[0]?.id ?? null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [sourceDataMap, setSourceDataMap] = useState<Record<string, Record<string, unknown>[]>>({})
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
-  const { data: equipment = [], isLoading } = useQuery({
-    queryKey: ['equipment'],
-    queryFn: mockService.getEquipment,
-  })
+  const selectedTable = tables.find(t => t.id === selectedId) ?? null
 
-  const { data: bays = [] } = useQuery({
-    queryKey: ['fabBays'],
-    queryFn: mockService.getFabBays,
-  })
-
+  // JOIN 해석을 위해 모든 테이블 rows 로드
   useEffect(() => {
-    if (selectedTable === 'equipment') setRowData(equipment)
-    else if (selectedTable === 'bays') setRowData(bays as unknown as Equipment[])
-  }, [selectedTable, equipment, bays])
+    buildSourceDataMap(tables).then(setSourceDataMap)
+  }, [tables])
 
-  const equipmentCols: ColDef<Equipment>[] = [
-    { field: 'equipment_no', headerName: '설비번호', width: 120, editable: true, pinned: 'left' },
-    { field: 'name', headerName: '설비명', flex: 1, minWidth: 130, editable: true },
-    { field: 'model', headerName: '모델', width: 150, editable: true },
-    {
-      field: 'status', headerName: '상태', width: 100, editable: true,
-      cellEditor: 'agSelectCellEditor',
-      cellEditorParams: { values: ['OPERATING', 'PLANNED_IN', 'PLANNED_OUT', 'REMOVED'] },
-      valueFormatter: p => statusLabel[p.value] ?? p.value,
-      cellStyle: p => {
-        const c: Record<string, string> = {
-          OPERATING: '#dbeafe', PLANNED_IN: '#dcfce7', PLANNED_OUT: '#ffedd5', REMOVED: '#f1f5f9'
-        }
-        return { backgroundColor: c[p.value] ?? 'white' }
-      }
-    },
-    { field: 'width_mm', headerName: '폭(mm)', width: 90, editable: true, type: 'numericColumn' },
-    { field: 'depth_mm', headerName: '깊이(mm)', width: 90, editable: true, type: 'numericColumn' },
-    { field: 'height_mm', headerName: '높이(mm)', width: 90, editable: true, type: 'numericColumn' },
-    { field: 'maintenance_space_mm', headerName: '유지보수(mm)', width: 110, editable: true, type: 'numericColumn' },
-    {
-      field: 'investment_type', headerName: '투자구분', width: 100, editable: true,
-      cellEditor: 'agSelectCellEditor',
-      cellEditorParams: { values: ['NEW', 'EXPANSION', 'REPLACEMENT', 'RELOCATION'] },
-      valueFormatter: p => investLabel[p.value] ?? p.value ?? '-',
-    },
-    {
-      field: 'fab_bay_id', headerName: 'Bay', width: 100, editable: true,
-      valueFormatter: p => bayLabel[p.value] ?? p.value ?? '-',
-    },
-    { field: 'planned_in_date', headerName: '반입예정일', width: 120, editable: true },
-    { field: 'planned_out_date', headerName: '반출예정일', width: 120, editable: true },
-    { field: 'created_at', headerName: '등록일', width: 120, editable: false,
-      valueFormatter: p => p.value ? new Date(p.value).toLocaleDateString('ko-KR') : '-'
-    },
-  ]
-
-  const getContextMenuItems = useCallback((params: GetContextMenuItemsParams): (MenuItemDef | DefaultMenuItem)[] => {
-    return [
-      {
-        name: '행 추가',
-        icon: '<span>+</span>',
-        action: () => {
-          const newRow: Equipment = {
-            id: `eq_new_${Date.now()}`,
-            equipment_no: 'NEW-001',
-            name: '새 설비',
-            width_mm: 1000,
-            depth_mm: 1000,
-            height_mm: 2000,
-            maintenance_space_mm: 600,
-            status: 'PLANNED_IN',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }
-          setRowData(prev => [...prev, newRow])
-          setLastModified(new Date().toLocaleString('ko-KR'))
-          toast.success('행이 추가되었습니다.')
-        }
-      },
-      {
-        name: '선택 행 삭제',
-        icon: '<span>✕</span>',
-        action: () => {
-          const selected = params.api.getSelectedRows()
-          if (selected.length === 0) {
-            toast.error('삭제할 행을 선택하세요.')
-            return
-          }
-          const selectedIds = new Set(selected.map((r: Equipment) => r.id))
-          setRowData(prev => prev.filter(r => !selectedIds.has(r.id)))
-          setLastModified(new Date().toLocaleString('ko-KR'))
-          toast.success(`${selected.length}개 행이 삭제되었습니다.`)
-        }
-      },
-      'separator' as DefaultMenuItem,
-      {
-        name: `이 값으로 필터: ${params.value ?? '(없음)'}`,
-        action: () => {
-          if (params.column && params.value !== undefined) {
-            params.api.setFilterModel({
-              [params.column.getColId()]: { type: 'equals', filter: String(params.value) }
-            })
-            toast.success('필터가 적용되었습니다.')
-          }
-        }
-      },
-      'separator' as DefaultMenuItem,
-      'copy' as DefaultMenuItem,
-      'paste' as DefaultMenuItem,
-    ]
-  }, [])
-
-  // Ctrl+V paste simulation
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        toast.success('붙여넣기 시뮬레이션: 클립보드에서 데이터를 가져옵니다.', { duration: 2000 })
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [])
-
-  const handleAddRow = () => {
-    const newRow: Equipment = {
-      id: `eq_new_${Date.now()}`,
-      equipment_no: `NEW-${String(rowData.length + 1).padStart(3, '0')}`,
-      name: '새 설비',
-      width_mm: 1000, depth_mm: 1000, height_mm: 2000,
-      maintenance_space_mm: 600,
-      status: 'PLANNED_IN',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    setRowData(prev => [...prev, newRow])
-    setLastModified(new Date().toLocaleString('ko-KR'))
-    toast.success('새 행이 추가되었습니다.')
+  // 테이블 추가 후 자동 선택
+  const handleCreate = (table: CustomTable) => {
+    addTable(table)
+    setSelectedId(table.id)
+    setShowCreate(false)
+    toast.success(`'${table.name}' 테이블이 생성되었습니다.`)
   }
 
-  const handleImport = () => {
-    toast('데이터 가져오기 기능은 준비 중입니다.', { icon: 'ℹ️' })
+  const handleSaveRows = (tableId: string, rows: Record<string, unknown>[], record: TableChangeRecord) => {
+    saveRows(tableId, rows, record)
+  }
+
+  const handleDelete = (id: string) => {
+    const table = tables.find(t => t.id === id)
+    if (!table) return
+    if (table.isSystem) {
+      toast.error('시스템 테이블은 삭제할 수 없습니다.')
+      return
+    }
+    deleteTable(id)
+    setSelectedId(tables.find(t => t.id !== id)?.id ?? null)
+    setConfirmDelete(null)
+    toast.success('테이블이 삭제되었습니다.')
   }
 
   return (
     <PageLayout>
-      <div className="space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">데이터 관리</h1>
-            <p className="text-sm text-gray-500 mt-0.5">Origin 테이블 관리</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleAddRow}
-              className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-            >
-              <Plus size={16} />
-              새 행 추가
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
-              <Columns size={16} />
-              컬럼 관리
-            </button>
-            <button
-              onClick={handleImport}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              <Upload size={16} />
-              데이터 가져오기
-            </button>
-          </div>
-        </div>
-
-        {/* Table Selector */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-gray-700">테이블 선택:</label>
-            <select
-              value={selectedTable}
-              onChange={e => setSelectedTable(e.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {TABLE_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <span className="text-xs text-gray-500 ml-2">
-              💡 셀 클릭으로 인라인 편집, 우클릭으로 컨텍스트 메뉴
-            </span>
-          </div>
-        </div>
-
-        {/* Grid */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <RefreshCw className="animate-spin text-blue-500" size={28} />
+      <div className="flex h-[calc(100vh-112px)] gap-0 rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-white">
+        {/* ── 왼쪽: 테이블 목록 ── */}
+        <aside className="w-56 shrink-0 flex flex-col border-r border-gray-100">
+          <div className="px-3 pt-4 pb-2">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold">테이블 목록</p>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-all"
+                title="새 테이블"
+              >
+                <Plus size={14} />
+              </button>
             </div>
-          ) : (
-            <div className="ag-theme-quartz" style={{ height: 480 }}>
-              <AgGridReact
-                rowData={rowData}
-                columnDefs={equipmentCols}
-                defaultColDef={{
-                  resizable: true,
-                  sortable: true,
-                  filter: true,
-                  editable: false,
-                }}
-                rowSelection="multiple"
-                onSelectionChanged={e => setSelectedRows(e.api.getSelectedRows())}
-                getContextMenuItems={getContextMenuItems}
-                onCellValueChanged={() => {
-                  setLastModified(new Date().toLocaleString('ko-KR'))
-                }}
-                suppressMovableColumns={false}
-                enableCellTextSelection={true}
-                onGridReady={p => { gridApiRef.current = p.api }}
-                rowHeight={36}
-                headerHeight={40}
-              />
-            </div>
-          )}
-        </div>
+          </div>
 
-        {/* Status Bar */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 px-4 py-2.5 flex items-center gap-4 text-xs text-gray-500">
-          <span>총 <strong>{rowData.length}</strong>행</span>
-          <span>|</span>
-          <span>선택 <strong>{selectedRows.length}</strong>행</span>
-          {lastModified && (
+          <nav className="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5">
+            {tables.map(table => {
+              const meta = TYPE_META[table.tableType]
+              const isActive = table.id === selectedId
+              return (
+                <div key={table.id} className="group relative">
+                  <button
+                    onClick={() => setSelectedId(table.id)}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-all ${
+                      isActive
+                        ? 'bg-blue-50 text-blue-900'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`shrink-0 ${isActive ? 'text-blue-500' : 'text-gray-400'}`}>
+                        {meta.icon}
+                      </span>
+                      <span className="text-[13px] font-medium truncate">{table.name}</span>
+                    </div>
+                    <div className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${meta.color}`}>
+                      {meta.label}
+                    </div>
+                  </button>
+                  {/* 삭제 버튼 (시스템 테이블 제외) */}
+                  {!table.isSystem && (
+                    <button
+                      onClick={() => setConfirmDelete(table.id)}
+                      className="absolute top-2 right-1 w-5 h-5 items-center justify-center rounded text-gray-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 hidden group-hover:flex"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+
+            {tables.length === 0 && (
+              <div className="text-center py-8 text-gray-400 text-xs">
+                테이블이 없습니다
+              </div>
+            )}
+          </nav>
+
+          <div className="border-t border-gray-100 px-3 py-3">
+            <button
+              onClick={() => setShowCreate(true)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors"
+            >
+              <Plus size={14} />
+              새 테이블
+            </button>
+          </div>
+        </aside>
+
+        {/* ── 오른쪽: 테이블 콘텐츠 ── */}
+        <main className="flex-1 flex flex-col min-w-0">
+          {selectedTable ? (
             <>
-              <span>|</span>
-              <span>마지막 수정: <strong>{lastModified}</strong></span>
+              {/* 테이블 헤더 */}
+              <div className="flex items-center gap-3 px-5 py-3.5 border-b border-gray-100 bg-white shrink-0">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${TYPE_META[selectedTable.tableType].color}`}>
+                    {TYPE_META[selectedTable.tableType].icon}
+                    {TYPE_META[selectedTable.tableType].label}
+                  </span>
+                  <h2 className="text-base font-bold text-gray-900 truncate">{selectedTable.name}</h2>
+                  {selectedTable.isSystem && (
+                    <span className="text-[11px] text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded-full">시스템</span>
+                  )}
+                </div>
+                {selectedTable.tableType === 'ORIGIN' && !selectedTable.isSystem && (
+                  <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-gray-500 border border-gray-200 hover:bg-gray-50 transition-colors">
+                    <Settings size={13} />
+                    컬럼 편집
+                  </button>
+                )}
+              </div>
+
+              {/* 테이블 뷰어 */}
+              <div className="flex-1 min-h-0">
+                {selectedTable.tableType === 'ORIGIN' && (
+                  <OriginTableViewer
+                    table={selectedTable}
+                    sourceDataMap={sourceDataMap}
+                    onSaveRows={(rows, record) => handleSaveRows(selectedTable.id, rows, record)}
+                  />
+                )}
+                {selectedTable.tableType === 'API_CONNECTED' && (
+                  <ApiTableViewer table={selectedTable} />
+                )}
+                {selectedTable.tableType === 'COMBINED' && (
+                  <CombinedTableViewer table={selectedTable} allTables={tables} />
+                )}
+              </div>
             </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+              <Database size={40} className="mb-4 opacity-30" />
+              <p className="text-sm font-medium text-gray-500 mb-1">테이블을 선택하세요</p>
+              <p className="text-xs text-gray-400 mb-4">또는 새 테이블을 생성하세요</p>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              >
+                <Plus size={14} />
+                새 테이블 생성
+              </button>
+            </div>
           )}
-          <span className="ml-auto text-gray-400">Ctrl+V로 엑셀 붙여넣기 지원</span>
-        </div>
+        </main>
       </div>
+
+      {/* 테이블 생성 모달 */}
+      {showCreate && (
+        <CreateTableModal
+          existingTables={tables}
+          onClose={() => setShowCreate(false)}
+          onCreate={handleCreate}
+        />
+      )}
+
+      {/* 삭제 확인 */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmDelete(null)} />
+          <div className="relative bg-white rounded-xl shadow-xl border border-gray-200 p-6 w-80">
+            <h3 className="text-base font-bold text-gray-900 mb-2">테이블 삭제</h3>
+            <p className="text-sm text-gray-600 mb-5">
+              '{tables.find(t => t.id === confirmDelete)?.name}' 테이블을 삭제합니다.
+              <br />데이터는 복구할 수 없습니다.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="px-4 py-2 rounded-lg text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleDelete(confirmDelete)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageLayout>
   )
 }

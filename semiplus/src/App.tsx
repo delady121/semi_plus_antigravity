@@ -4,7 +4,9 @@ import { Toaster } from 'react-hot-toast'
 import { useAuthStore } from './stores/authStore'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { LayoutListPage } from './pages/LayoutListPage'
 import { LayoutEditorPage } from './pages/LayoutEditorPage'
+import { LayoutViewPage } from './pages/LayoutViewPage'
 import { DataManagementPage } from './pages/DataManagementPage'
 import { WorkflowPage } from './pages/WorkflowPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -31,9 +33,13 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-          <Route path="/dashboard/*" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-          <Route path="/layout" element={<PrivateRoute><LayoutEditorPage /></PrivateRoute>} />
-          <Route path="/layout/*" element={<PrivateRoute><LayoutEditorPage /></PrivateRoute>} />
+          <Route path="/dashboard/:id" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+
+          {/* 레이아웃: 목록 → 보기 → 편집 */}
+          <Route path="/layout" element={<PrivateRoute><LayoutListPage /></PrivateRoute>} />
+          <Route path="/layout/:id" element={<PrivateRoute><LayoutViewPage /></PrivateRoute>} />
+          <Route path="/layout/:id/edit" element={<PrivateRoute><LayoutEditorPage /></PrivateRoute>} />
+
           <Route path="/data" element={<PrivateRoute><DataManagementPage /></PrivateRoute>} />
           <Route path="/data/*" element={<PrivateRoute><DataManagementPage /></PrivateRoute>} />
           <Route path="/workflow" element={<PrivateRoute><WorkflowPage /></PrivateRoute>} />

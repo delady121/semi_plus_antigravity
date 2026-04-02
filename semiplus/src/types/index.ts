@@ -136,3 +136,57 @@ export interface Comment {
   content: string
   created_at: string
 }
+
+// ─────────────────────────────────────────────────
+// Data Management — Custom Table Types
+// ─────────────────────────────────────────────────
+
+export type TableType = 'ORIGIN' | 'API_CONNECTED' | 'COMBINED'
+export type CustomColumnType = 'USER_INPUT' | 'JOIN' | 'CALCULATED'
+
+export interface CustomColumnDef {
+  id: string
+  field: string          // unique field key (영문, underscore)
+  headerName: string     // 표시 이름
+  colType: CustomColumnType
+  width?: number
+  // JOIN 컬럼 설정
+  joinTableId?: string   // 원본 테이블 id
+  joinOnField?: string   // 현재 테이블에서 JOIN 키로 사용할 필드
+  joinValueField?: string // 원본 테이블에서 가져올 값 필드
+  // CALCULATED 컬럼 설정
+  formula?: string       // 예: "{width_mm} * {depth_mm}"
+}
+
+export interface TableChangeRecord {
+  id: string
+  timestamp: string
+  userId: string
+  userName: string
+  reason: string
+  rowCount: number       // 변경된 행 수
+}
+
+export interface CustomTable {
+  id: string
+  name: string
+  tableType: TableType
+  columns: CustomColumnDef[]
+  rows: Record<string, unknown>[]
+  changeHistory: TableChangeRecord[]
+  // API_CONNECTED 설정
+  apiSource?: string          // 'equipment' | 'fabBays'
+  apiSelectedFields?: string[]
+  sqlQuery?: string
+  // COMBINED 설정
+  baseTableId?: string
+  combineColumns?: { tableId: string; field: string; headerName: string }[]
+  joinKey?: string            // 현재 테이블에서 JOIN 키로 사용할 필드
+  joinTargetKey?: string      // 대상 테이블에서 JOIN 키로 사용할 필드
+  // 메타
+  createdAt: string
+  updatedAt: string
+  createdById: string
+  createdByName: string
+  isSystem?: boolean          // mock 기본 제공 테이블
+}

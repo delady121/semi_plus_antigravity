@@ -1,13 +1,16 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react'
-import { Stage, Layer, Rect, Line, Text, Circle, Arrow, Group } from 'react-konva'
+import { Stage, Layer, Rect, Line, Text, Circle, Arrow, Group, Image as KonvaImage } from 'react-konva'
 import type Konva from 'konva'
 import { useLayoutEditorStore } from '../../stores/layoutEditorStore'
 import type { Equipment, EquipmentPlacement } from '../../types'
+import type { LayoutItem } from '../../stores/layoutStore'
 
 interface Props {
   equipment: Equipment[]
   containerWidth: number
   containerHeight: number
+  readonly?: boolean
+  layout?: LayoutItem
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -17,9 +20,12 @@ const STATUS_COLORS: Record<string, string> = {
   REMOVED: '#94a3b8',
 }
 
-const GRID_SIZE = 60 // pixels representing 600mm
+const DEFAULT_CANVAS_W = 3000
+const DEFAULT_CANVAS_H = 2000
 
-export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, containerHeight }) => {
+export const EditorCanvas: React.FC<Props> = ({
+  equipment, containerWidth, containerHeight, readonly = false, layout,
+}) => {
   const {
     layers, placements, customShapes,
     selectedEquipmentIds, toolMode, zoomLevel, canvasOffset,
@@ -30,9 +36,33 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
 
   const stageRef = useRef<Konva.Stage>(null)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+  const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
+  const [canvasNativeSize, setCanvasNativeSize] = useState({ w: DEFAULT_CANVAS_W, h: DEFAULT_CANVAS_H })
 
   const isLayerVisible = (code: string) => layers.find(l => l.code === code)?.visible ?? true
   const isLayerLocked = (code: string) => layers.find(l => l.code === code)?.locked ?? false
+
+  // 배경 이미지 로드
+  useEffect(() => {
+    if (!layout?.backgroundImageData) {
+      setBgImage(null)
+      return
+    }
+    const img = new window.Image()
+    img.onload = () => {
+      setBgImage(img)
+      setCanvasNativeSize({ w: img.naturalWidth, h: img.naturalHeight })
+    }
+    img.src = layout.backgroundImageData
+  }, [layout?.backgroundImageData])
+
+  // 격자 픽셀 크기 계산
+  const gridPx = layout?.scaleMmPerPx
+    ? layout.gridSizeMm / layout.scaleMmPerPx
+    : 60  // 기본 60px
+
+  const CW = canvasNativeSize.w
+  const CH = canvasNativeSize.h
 
   // Mouse wheel zoom
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -90,11 +120,9 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
     const x = (e.clientX - rect.left - canvasOffset.x) / zoomLevel
     const y = (e.clientY - rect.top - canvasOffset.y) / zoomLevel
 
-    // Snap to grid
-    const snapX = Math.round(x / GRID_SIZE) * GRID_SIZE
-    const snapY = Math.round(y / GRID_SIZE) * GRID_SIZE
+    const snapX = Math.round(x / gridPx) * gridPx
+    const snapY = Math.round(y / gridPx) * gridPx
 
-    // Check if already placed
     const existing = placements.find(p => p.equipment_id === equipId)
     if (existing) {
       pushHistory()
@@ -117,8 +145,8 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
 
   // Equipment drag
   const handleEquipDragEnd = (placement: EquipmentPlacement, e: Konva.KonvaEventObject<DragEvent>) => {
-    const snapX = Math.round(e.target.x() / GRID_SIZE) * GRID_SIZE
-    const snapY = Math.round(e.target.y() / GRID_SIZE) * GRID_SIZE
+    const snapX = Math.round(e.target.x() / gridPx) * gridPx
+    const snapY = Math.round(e.target.y() / gridPx) * gridPx
     updatePlacement(placement.id, { x: snapX, y: snapY })
   }
 
@@ -169,68 +197,103 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
         onClick={handleStageClick}
         onMouseMove={handleMouseMove}
       >
-        {/* L1: Background */}
+        {/* L1: 배경 이미지 또는 기본 배경 */}
         {isLayerVisible('L1') && (
           <Layer>
-            <Rect x={0} y={0} width={3000} height={2000} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={2} />
-            {/* Room label */}
-            <Text x={10} y={10} text="FAB Bay" fontSize={14} fill="#94a3b8" fontStyle="bold" />
+            {bgImage ? (
+              <KonvaImage
+                image={bgImage}
+                x={0} y={0}
+                width={CW} height={CH}
+              />
+            ) : (
+              <>
+                <Rect x={0} y={0} width={CW} height={CH} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={2} />
+                <Text x={10} y={10} text="배경 이미지를 업로드하세요" fontSize={14} fill="#94a3b8" />
+              </>
+            )}
           </Layer>
         )}
 
-        {/* L4: 600mm Grid */}
-        {isLayerVisible('L4') && (
+        {/* L4: 격자 (layout.gridEnabled 시 표시) */}
+        {isLayerVisible('L4') && layout?.gridEnabled && (
           <Layer>
-            {Array.from({ length: Math.ceil(3000 / GRID_SIZE) + 1 }).map((_, i) => (
+            {Array.from({ length: Math.ceil(CW / gridPx) + 1 }).map((_, i) => (
               <Line
                 key={`v${i}`}
-                points={[i * GRID_SIZE, 0, i * GRID_SIZE, 2000]}
-                stroke="#e2e8f0"
+                points={[i * gridPx, 0, i * gridPx, CH]}
+                stroke="#64748b"
                 strokeWidth={0.5}
+                opacity={0.4}
               />
             ))}
-            {Array.from({ length: Math.ceil(2000 / GRID_SIZE) + 1 }).map((_, i) => (
+            {Array.from({ length: Math.ceil(CH / gridPx) + 1 }).map((_, i) => (
               <Line
                 key={`h${i}`}
-                points={[0, i * GRID_SIZE, 3000, i * GRID_SIZE]}
-                stroke="#e2e8f0"
+                points={[0, i * gridPx, CW, i * gridPx]}
+                stroke="#64748b"
                 strokeWidth={0.5}
+                opacity={0.4}
               />
             ))}
           </Layer>
         )}
 
-        {/* L2: Placement Area */}
-        {isLayerVisible('L2') && (
+        {/* L2: 설비 배치 영역 (layout.placementZones 기반) */}
+        {isLayerVisible('L2') && layout?.placementZones && layout.placementZones.length > 0 && (
           <Layer>
-            <Rect
-              x={60} y={60} width={2880} height={1880}
-              fill="#eff6ff" stroke="#bfdbfe" strokeWidth={2} opacity={0.5}
-            />
-            <Text x={70} y={70} text="배치 가능 영역" fontSize={12} fill="#93c5fd" />
-          </Layer>
-        )}
-
-        {/* L3: OHT Rails */}
-        {isLayerVisible('L3') && (
-          <Layer>
-            {[360, 720, 1080, 1440].map((y, i) => (
-              <React.Fragment key={`oht${i}`}>
-                <Line points={[0, y, 3000, y]} stroke="#f97316" strokeWidth={6} opacity={0.7} />
-                <Text x={10} y={y - 14} text={`OHT Rail ${i + 1}`} fontSize={10} fill="#f97316" />
+            {layout.placementZones.map(zone => (
+              <React.Fragment key={zone.id}>
+                <Rect
+                  x={zone.x} y={zone.y}
+                  width={zone.width} height={zone.height}
+                  fill="#eff6ff" stroke="#3b82f6" strokeWidth={1.5} opacity={0.5}
+                />
+                {zone.label && (
+                  <Text
+                    x={zone.x + 6} y={zone.y + 6}
+                    text={zone.label}
+                    fontSize={11} fill="#3b82f6"
+                  />
+                )}
               </React.Fragment>
             ))}
           </Layer>
         )}
 
-        {/* L5: Equipment */}
-        {isLayerVisible('L5') && (
+        {/* L3: OHT 레일 (layout.ohtRails 기반) */}
+        {isLayerVisible('L3') && layout?.ohtRails && layout.ohtRails.length > 0 && (
+          <Layer>
+            {layout.ohtRails.map((rail, i) => (
+              <React.Fragment key={rail.id}>
+                <Line
+                  points={rail.points}
+                  stroke="#f97316"
+                  strokeWidth={4}
+                  opacity={0.8}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Text
+                  x={rail.points[0] + 4}
+                  y={rail.points[1] - 14}
+                  text={`OHT Rail ${i + 1}`}
+                  fontSize={10}
+                  fill="#f97316"
+                />
+              </React.Fragment>
+            ))}
+          </Layer>
+        )}
+
+        {/* L5: 설비 배치 (일반 편집 모드) */}
+        {isLayerVisible('L5') && placements.length > 0 && (
           <Layer>
             {placements.map(placement => {
               const eq = equipment.find(e => e.id === placement.equipment_id)
               if (!eq) return null
 
-              const scale = 1 / 14 // 1px = ~14mm roughly
+              const scale = 1 / 14
               const w = Math.max(40, eq.width_mm * scale)
               const h = Math.max(30, eq.depth_mm * scale)
               const maint = eq.maintenance_space_mm * scale
@@ -247,14 +310,12 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
                   onClick={(e) => handleEquipClick(eq.id, e)}
                   onDragEnd={(e) => handleEquipDragEnd(placement, e)}
                 >
-                  {/* Maintenance space */}
                   <Rect
                     x={-maint} y={-maint}
                     width={w + maint * 2} height={h + maint * 2}
                     fill={color} opacity={0.1}
                     stroke={color} strokeWidth={0.5} strokeDashArray={[4, 4]}
                   />
-                  {/* Equipment body */}
                   <Rect
                     width={w} height={h}
                     fill={color} opacity={isSelected ? 1 : 0.85}
@@ -264,7 +325,6 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
                     shadowColor={isSelected ? '#facc15' : 'transparent'}
                     shadowBlur={isSelected ? 8 : 0}
                   />
-                  {/* Equipment text */}
                   <Text
                     x={2} y={4}
                     width={w - 4}
@@ -288,7 +348,7 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
           </Layer>
         )}
 
-        {/* L6: User Markings */}
+        {/* L6: 사용자 마킹 */}
         {isLayerVisible('L6') && (
           <Layer>
             {customShapes.map(shape => {
@@ -337,26 +397,6 @@ export const EditorCanvas: React.FC<Props> = ({ equipment, containerWidth, conta
               }
               return null
             })}
-          </Layer>
-        )}
-
-        {/* L7: Review / Optimization Results */}
-        {isLayerVisible('L7') && (
-          <Layer>
-            {/* Sample optimization suggestions */}
-            <Rect
-              x={200} y={800} width={120} height={90}
-              stroke="#10b981" strokeWidth={2} strokeDashArray={[6, 3]}
-              fill="#10b98120"
-            />
-            <Text x={205} y={805} text="추천 위치" fontSize={10} fill="#10b981" fontStyle="bold" />
-            {/* Sample warning */}
-            <Rect
-              x={500} y={400} width={100} height={80}
-              stroke="#ef4444" strokeWidth={2} strokeDashArray={[4, 3]}
-              fill="#ef444420"
-            />
-            <Text x={505} y={405} text="⚠ 간격 부족" fontSize={10} fill="#ef4444" fontStyle="bold" />
           </Layer>
         )}
       </Stage>
