@@ -1,10 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import toast from 'react-hot-toast'
 import {
   CheckCircle2, Circle, ImageUp, Ruler, Grid3x3, SquareDashed,
-  Route, Cpu, Building2, Plus, Trash2, ChevronRight, Info, Search, ChevronDown,
+  Route, Cpu, Building2, Plus, Trash2, ChevronRight, Info, Search, ChevronDown, Layers,
 } from 'lucide-react'
 import type { LayoutItem, ScaleMeasurement } from '../../stores/layoutStore'
-import { mockService } from '../../services/mockData'
+import { useDataTableStore } from '../../stores/dataTableStore'
+import { useLayoutEditorStore, type GeneratedEquipment } from '../../stores/layoutEditorStore'
 import type { MockTableInfo } from '../../services/mockData'
 
 interface Props {
@@ -27,6 +29,7 @@ const STEPS = [
 
 export const SetupWizard: React.FC<Props> = ({ layout, onUpdate, onComplete }) => {
   const currentStep = layout.setupStep
+  const { setToolMode } = useLayoutEditorStore()
 
   const goToStep = (step: number) => onUpdate({ setupStep: step })
   const nextStep = () => {
@@ -36,6 +39,13 @@ export const SetupWizard: React.FC<Props> = ({ layout, onUpdate, onComplete }) =
   const prevStep = () => {
     if (currentStep > 3) goToStep(currentStep - 1)
   }
+
+  // 단계 진입 시 그리기 도구 자동 활성화
+  useEffect(() => {
+    if (currentStep === 6) setToolMode('zone')
+    else if (currentStep === 7) setToolMode('oht')
+    else setToolMode('select')
+  }, [currentStep, setToolMode])
 
   return (
     <aside
@@ -347,7 +357,7 @@ const Step6: React.FC = () => (
     </div>
     <div className="rounded-xl bg-slate-800 p-3 text-center">
       <SquareDashed size={28} className="mx-auto text-slate-400 mb-2" />
-      <p className="text-[12px] text-slate-400">도구 모음에서 [배치영역] 선택 후<br />캔버스에서 드래그하세요</p>
+      <p className="text-[12px] text-slate-400">배치영역 그리기 도구가 자동으로 활성화됩니다.<br />캔버스에서 바로 드래그하세요.</p>
     </div>
   </div>
 )
@@ -371,7 +381,7 @@ const Step7: React.FC = () => (
     </div>
     <div className="rounded-xl bg-slate-800 p-3 text-center">
       <Route size={28} className="mx-auto text-slate-400 mb-2" />
-      <p className="text-[12px] text-slate-400">도구 모음 → OHT 레일 → 캔버스 클릭</p>
+      <p className="text-[12px] text-slate-400">OHT 레일 그리기 도구가 자동으로 활성화됩니다.<br />캔버스에서 바로 클릭하세요.</p>
     </div>
   </div>
 )
@@ -454,7 +464,7 @@ const TableSearchDropdown: React.FC<{
 const ColumnDropdown: React.FC<{
   label: string
   value: string
-  columns: string[]
+  columns: { value: string; label: string }[]
   onChange: (v: string) => void
   required?: boolean
 }> = ({ label, value, columns, onChange, required }) => (
@@ -470,7 +480,7 @@ const ColumnDropdown: React.FC<{
     >
       <option value="">-- 컬럼 선택 --</option>
       {columns.map(col => (
-        <option key={col} value={col}>{col}</option>
+        <option key={col.value} value={col.value}>{col.label}</option>
       ))}
     </select>
   </div>
@@ -479,33 +489,60 @@ const ColumnDropdown: React.FC<{
 const LayerConfigForm: React.FC<{
   config: LayoutItem['equipmentLayerConfig']
   onUpdate: (c: NonNullable<LayoutItem['equipmentLayerConfig']>) => void
-  showEqpId?: boolean
-}> = ({ config, onUpdate, showEqpId = true }) => {
-  const [tables, setTables] = useState<MockTableInfo[]>([])
-  const [columns, setColumns] = useState<string[]>([])
+  eqpIdLabel?: string
+}> = ({ config, onUpdate, eqpIdLabel = 'EQP_ID 컬럼' }) => {
+  // [사내망 이관 시 교체] 데이터 관리 테이블 목록 실제 API로 교체 필요
+  const { tables: dataTables } = useDataTableStore()
   const c = config ?? { tableId: '', xmaxField: '', xminField: '', ymaxField: '', yminField: '', eqpIdField: '', extraFields: [] }
 
-  // 테이블 목록 로드
-  // [사내망 이관 시 교체] 실제 API 엔드포인트로 교체 필요
-  useEffect(() => {
-    mockService.getLayoutTables().then(setTables)
-  }, [])
+  const tables: MockTableInfo[] = dataTables.map(t => {
+    let cols: string[]
+    if (t.tableType === 'API_CONNECTED') {
+      cols = t.apiSelectedFields ?? []
+    } else if (t.tableType === 'COMBINED') {
+      cols = [...t.columns.map(col => col.field), ...(t.combineColumns ?? []).map(cc => cc.field)]
+    } else {
+      cols = t.columns.map(col => col.field)
+    }
+    return {
+      id: t.id,
+      name: t.name,
+      description: { ORIGIN: '직접 생성', API_CONNECTED: '사내 데이터 연결', COMBINED: '조합 테이블' }[t.tableType] ?? '',
+      columns: cols,
+    }
+  })
 
-  // 선택된 테이블의 컬럼 로드
-  useEffect(() => {
-    if (!c.tableId) { setColumns([]); return }
-    mockService.getTableColumns(c.tableId).then(setColumns)
-  }, [c.tableId])
+  // 수정 4: 선택한 테이블의 컬럼명(headerName) 포함 목록 구성
+  const selectedCustomTable = dataTables.find(t => t.id === c.tableId)
+  const columnsWithLabels: { value: string; label: string }[] = selectedCustomTable
+    ? selectedCustomTable.tableType === 'API_CONNECTED'
+      ? (selectedCustomTable.apiSelectedFields ?? []).map(f => ({ value: f, label: f }))
+      : selectedCustomTable.tableType === 'COMBINED'
+        ? [
+            ...selectedCustomTable.columns.map(col => ({ value: col.field, label: col.headerName || col.field })),
+            ...(selectedCustomTable.combineColumns ?? []).map(cc => ({ value: cc.field, label: cc.headerName || cc.field })),
+          ]
+        : selectedCustomTable.columns.map(col => ({ value: col.field, label: col.headerName || col.field }))
+    : []
 
   const update = (key: string, val: string) => onUpdate({ ...c, [key]: val })
 
+  // 수정 5 + 7: EQP_ID/명칭 컬럼을 가장 앞에 배치
   const columnFields = [
+    { key: 'eqpIdField', label: eqpIdLabel },
     { key: 'xmaxField', label: 'Xmax 컬럼' },
     { key: 'xminField', label: 'Xmin 컬럼' },
     { key: 'ymaxField', label: 'Ymax 컬럼' },
     { key: 'yminField', label: 'Ymin 컬럼' },
-    ...(showEqpId ? [{ key: 'eqpIdField', label: 'EQP_ID 컬럼' }] : []),
   ]
+
+  if (tables.length === 0) {
+    return (
+      <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-center">
+        <p className="text-[12px] text-amber-700 font-medium">데이터 관리에서 테이블을 먼저 생성해주세요.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-2.5">
@@ -523,8 +560,8 @@ const LayerConfigForm: React.FC<{
         <ColumnDropdown
           key={f.key}
           label={f.label}
-          value={(c as Record<string, string>)[f.key] ?? ''}
-          columns={columns}
+          value={(c as unknown as Record<string, string>)[f.key] ?? ''}
+          columns={columnsWithLabels}
           onChange={v => update(f.key, v)}
           required
         />
@@ -533,29 +570,116 @@ const LayerConfigForm: React.FC<{
   )
 }
 
-const Step8: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) => void }> = ({ layout, onUpdate }) => (
-  <div className="space-y-3">
-    <StepHeader title="설비 레이어 설정" desc="설비 좌표 데이터가 있는 테이블과 필수 컬럼 5가지를 지정합니다." />
-    <LayerConfigForm
-      config={layout.equipmentLayerConfig}
-      onUpdate={c => onUpdate({ equipmentLayerConfig: c })}
-      showEqpId
-    />
-    {/* [사내망 이관 시 교체] 사내 Datalake 테이블 목록으로 교체 필요 */}
-  </div>
-)
+const Step8: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) => void }> = ({ layout, onUpdate }) => {
+  const { tables: dataTables } = useDataTableStore()
+  const { setGeneratedEquipments } = useLayoutEditorStore()
 
-const Step9: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) => void }> = ({ layout, onUpdate }) => (
-  <div className="space-y-3">
-    <StepHeader title="시설물 레이어 설정" desc="기둥, 계단실 등 시설물 좌표 테이블과 컬럼을 지정합니다." />
-    <LayerConfigForm
-      config={layout.facilityLayerConfig}
-      onUpdate={c => onUpdate({ facilityLayerConfig: c })}
-      showEqpId={false}
-    />
-    {/* [사내망 이관 시 교체] 사내 Datalake 테이블 목록으로 교체 필요 */}
-  </div>
-)
+  const cfg = layout.equipmentLayerConfig
+  const canGenerate = !!(cfg?.tableId && cfg.xmaxField && cfg.xminField && cfg.ymaxField && cfg.yminField)
+
+  const handleGenerate = useCallback(() => {
+    // [사내망 이관 시 교체] 설비 데이터 실제 API로 교체 필요
+    if (!cfg) return
+    const table = dataTables.find(t => t.id === cfg.tableId)
+    if (!table) return
+    const rows = table.rows ?? []
+    const generated: GeneratedEquipment[] = rows
+      .map((row, i) => {
+        const xmax = Number(row[cfg.xmaxField] ?? 0)
+        const xmin = Number(row[cfg.xminField] ?? 0)
+        const ymax = Number(row[cfg.ymaxField] ?? 0)
+        const ymin = Number(row[cfg.yminField] ?? 0)
+        const label = cfg.eqpIdField ? String(row[cfg.eqpIdField] ?? `EQP${i + 1}`) : `EQP${i + 1}`
+        if (xmax <= xmin || ymax <= ymin) return null
+        return {
+          id: `gen_${i}_${Date.now()}`,
+          label,
+          x: xmin,
+          y: ymin,
+          width: xmax - xmin,
+          height: ymax - ymin,
+        }
+      })
+      .filter((g): g is GeneratedEquipment => g !== null)
+    setGeneratedEquipments(generated)
+    toast.success(`설비 ${generated.length}개가 도면에 생성되었습니다.`)
+  }, [cfg, dataTables, setGeneratedEquipments])
+
+  return (
+    <div className="space-y-3">
+      <StepHeader title="설비 레이어 설정" desc="설비 좌표 데이터가 있는 테이블과 필수 컬럼 5가지를 지정합니다." />
+      <LayerConfigForm
+        config={layout.equipmentLayerConfig}
+        onUpdate={c => onUpdate({ equipmentLayerConfig: c })}
+      />
+      {canGenerate && (
+        <button
+          onClick={handleGenerate}
+          className="w-full py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-all"
+        >
+          설비 생성
+        </button>
+      )}
+      {/* [사내망 이관 시 교체] 사내 Datalake 테이블 목록으로 교체 필요 */}
+    </div>
+  )
+}
+
+const Step9: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) => void }> = ({ layout, onUpdate }) => {
+  const { tables: dataTables } = useDataTableStore()
+  const { setGeneratedFacilities } = useLayoutEditorStore()
+
+  const cfg = layout.facilityLayerConfig
+  const canGenerate = !!(cfg?.tableId && cfg.xmaxField && cfg.xminField && cfg.ymaxField && cfg.yminField)
+
+  const handleGenerate = useCallback(() => {
+    // [사내망 이관 시 교체] 시설물 데이터 실제 API로 교체 필요
+    if (!cfg) return
+    const table = dataTables.find(t => t.id === cfg.tableId)
+    if (!table) return
+    const rows = table.rows ?? []
+    const generated: GeneratedEquipment[] = rows
+      .map((row, i) => {
+        const xmax = Number(row[cfg.xmaxField] ?? 0)
+        const xmin = Number(row[cfg.xminField] ?? 0)
+        const ymax = Number(row[cfg.ymaxField] ?? 0)
+        const ymin = Number(row[cfg.yminField] ?? 0)
+        const label = cfg.eqpIdField ? String(row[cfg.eqpIdField] ?? `시설물${i + 1}`) : `시설물${i + 1}`
+        if (xmax <= xmin || ymax <= ymin) return null
+        return {
+          id: `fac_${i}_${Date.now()}`,
+          label,
+          x: xmin,
+          y: ymin,
+          width: xmax - xmin,
+          height: ymax - ymin,
+        }
+      })
+      .filter((g): g is GeneratedEquipment => g !== null)
+    setGeneratedFacilities(generated)
+    toast.success(`시설물 ${generated.length}개가 도면에 생성되었습니다.`)
+  }, [cfg, dataTables, setGeneratedFacilities])
+
+  return (
+    <div className="space-y-3">
+      <StepHeader title="시설물 레이어 설정" desc="기둥, 계단실 등 시설물 좌표 테이블과 컬럼을 지정합니다." />
+      <LayerConfigForm
+        config={layout.facilityLayerConfig}
+        onUpdate={c => onUpdate({ facilityLayerConfig: c })}
+        eqpIdLabel="명칭 컬럼"
+      />
+      {canGenerate && (
+        <button
+          onClick={handleGenerate}
+          className="w-full py-2 rounded-lg text-sm font-semibold bg-slate-600 text-white hover:bg-slate-700 transition-all"
+        >
+          시설물 생성
+        </button>
+      )}
+      {/* [사내망 이관 시 교체] 사내 Datalake 테이블 목록으로 교체 필요 */}
+    </div>
+  )
+}
 
 // ── Step 10: 사용자 정의 레이어 ──────────────────────────────
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Database, Layers, Link2, Trash2, Settings } from 'lucide-react'
+import { Plus, Database, Layers, Link2, Trash2, Settings, X } from 'lucide-react'
 import { PageLayout } from '../components/layout/PageLayout'
 import { useDataTableStore } from '../stores/dataTableStore'
 import { buildSourceDataMap } from '../services/dataTableService'
@@ -7,7 +7,7 @@ import { CreateTableModal } from '../components/data/CreateTableModal'
 import { OriginTableViewer } from '../components/data/OriginTableViewer'
 import { ApiTableViewer } from '../components/data/ApiTableViewer'
 import { CombinedTableViewer } from '../components/data/CombinedTableViewer'
-import type { CustomTable, TableChangeRecord } from '../types'
+import type { CustomTable, TableChangeRecord, CustomColumnDef, CustomColumnType } from '../types'
 import toast from 'react-hot-toast'
 
 const TYPE_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -16,12 +16,22 @@ const TYPE_META: Record<string, { label: string; color: string; icon: React.Reac
   COMBINED:     { label: '조합 테이블', color: 'text-purple-600 bg-purple-50 border-purple-200', icon: <Link2 size={12} /> },
 }
 
+const COL_TYPE_OPTIONS: { type: CustomColumnType; label: string; desc: string }[] = [
+  { type: 'USER_INPUT', label: '사용자 기입', desc: '사용자가 직접 값을 입력/편집' },
+  { type: 'JOIN',       label: 'JOIN 컬럼',   desc: '다른 테이블과 JOIN하여 값을 가져옴' },
+  { type: 'CALCULATED', label: '계산된 컬럼',  desc: 'Spotfire 방식의 수식 기반 자동 계산' },
+]
+
 export const DataManagementPage: React.FC = () => {
   const { tables, addTable, deleteTable, saveRows, updateTable } = useDataTableStore()
   const [selectedId, setSelectedId] = useState<string | null>(tables[0]?.id ?? null)
   const [showCreate, setShowCreate] = useState(false)
   const [sourceDataMap, setSourceDataMap] = useState<Record<string, Record<string, unknown>[]>>({})
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+  // 컬럼 편집 상태
+  const [showColumnEditor, setShowColumnEditor] = useState(false)
+  const [editingColumns, setEditingColumns] = useState<CustomColumnDef[]>([])
 
   const selectedTable = tables.find(t => t.id === selectedId) ?? null
 
@@ -53,6 +63,41 @@ export const DataManagementPage: React.FC = () => {
     setSelectedId(tables.find(t => t.id !== id)?.id ?? null)
     setConfirmDelete(null)
     toast.success('테이블이 삭제되었습니다.')
+  }
+
+  // ── 컬럼 편집 ──────────────────────────────────────────────
+
+  const handleOpenColumnEditor = () => {
+    if (!selectedTable || selectedTable.tableType !== 'ORIGIN') return
+    setEditingColumns(selectedTable.columns.map(c => ({ ...c })))
+    setShowColumnEditor(true)
+  }
+
+  const addEditingColumn = () => {
+    const newCol: CustomColumnDef = {
+      id: `new_${Date.now()}`,
+      field: `col_${Date.now()}`,
+      headerName: `새 항목 ${editingColumns.length + 1}`,
+      colType: 'USER_INPUT',
+      width: 140,
+    }
+    setEditingColumns(prev => [...prev, newCol])
+  }
+
+  const updateEditingColumn = (idx: number, updates: Partial<CustomColumnDef>) => {
+    setEditingColumns(prev => prev.map((c, i) => i === idx ? { ...c, ...updates } : c))
+  }
+
+  const removeEditingColumn = (idx: number) => {
+    if (editingColumns.length <= 1) return
+    setEditingColumns(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleSaveColumns = () => {
+    if (!selectedTable) return
+    updateTable(selectedTable.id, { columns: editingColumns })
+    setShowColumnEditor(false)
+    toast.success('컬럼 설정이 저장되었습니다.')
   }
 
   return (
@@ -145,7 +190,10 @@ export const DataManagementPage: React.FC = () => {
                   )}
                 </div>
                 {selectedTable.tableType === 'ORIGIN' && !selectedTable.isSystem && (
-                  <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-gray-500 border border-gray-200 hover:bg-gray-50 transition-colors">
+                  <button
+                    onClick={handleOpenColumnEditor}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-gray-500 border border-gray-200 hover:bg-gray-50 transition-colors"
+                  >
                     <Settings size={13} />
                     컬럼 편집
                   </button>
@@ -217,6 +265,154 @@ export const DataManagementPage: React.FC = () => {
                 className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors"
               >
                 삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 컬럼 편집 모달 */}
+      {showColumnEditor && selectedTable && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowColumnEditor(false)} />
+          <div
+            className="relative flex flex-col rounded-xl border border-white/10 shadow-2xl overflow-hidden animate-slide-up"
+            style={{ background: '#1E293B', width: 560, maxHeight: '88vh' }}
+          >
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
+              <div>
+                <p className="text-sm font-semibold text-white">컬럼 편집</p>
+                <p className="text-[11px] text-white/30 mt-0.5">{selectedTable.name} — 컬럼 추가/수정/삭제</p>
+              </div>
+              <button
+                onClick={() => setShowColumnEditor(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white hover:bg-white/[0.08] transition-all"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* 컨텐츠 */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-semibold">컬럼 정의</p>
+
+              {editingColumns.map((col, idx) => (
+                <div key={col.id} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="컬럼 이름"
+                      value={col.headerName}
+                      onChange={e => updateEditingColumn(idx, { headerName: e.target.value })}
+                      className="flex-1 px-2.5 py-1.5 rounded-lg text-[13px] bg-white/[0.05] border border-white/[0.06] text-white placeholder-white/25 focus:outline-none focus:border-brand-500/40 transition-colors"
+                    />
+                    <input
+                      type="text"
+                      placeholder="field_key"
+                      value={col.field}
+                      onChange={e => updateEditingColumn(idx, { field: e.target.value.replace(/[^a-zA-Z0-9_]/g, '_') })}
+                      className="w-32 px-2.5 py-1.5 rounded-lg text-[12px] bg-white/[0.05] border border-white/[0.06] text-white/70 placeholder-white/20 focus:outline-none focus:border-brand-500/40 transition-colors font-mono"
+                    />
+                    <button
+                      onClick={() => removeEditingColumn(idx)}
+                      disabled={editingColumns.length <= 1}
+                      className="w-7 h-7 flex items-center justify-center rounded text-white/30 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+
+                  {/* 컬럼 유형 선택 */}
+                  <div className="flex gap-1.5">
+                    {COL_TYPE_OPTIONS.map(opt => (
+                      <button
+                        key={opt.type}
+                        onClick={() => updateEditingColumn(idx, { colType: opt.type })}
+                        title={opt.desc}
+                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
+                          col.colType === opt.type
+                            ? 'bg-brand-500/25 text-brand-300 border border-brand-500/40'
+                            : 'bg-white/[0.04] text-white/40 border border-white/[0.06] hover:bg-white/[0.08]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* JOIN 설정 */}
+                  {col.colType === 'JOIN' && (
+                    <div className="space-y-1.5 pt-1">
+                      <select
+                        value={col.joinTableId ?? ''}
+                        onChange={e => updateEditingColumn(idx, { joinTableId: e.target.value })}
+                        className="w-full px-2.5 py-1.5 rounded-lg text-[12px] bg-white/[0.05] border border-white/[0.06] text-white focus:outline-none appearance-none"
+                      >
+                        <option value="">소스 테이블 선택...</option>
+                        {tables.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="JOIN 키 필드 (현재 테이블)"
+                          value={col.joinOnField ?? ''}
+                          onChange={e => updateEditingColumn(idx, { joinOnField: e.target.value })}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg text-[12px] bg-white/[0.05] border border-white/[0.06] text-white placeholder-white/20 focus:outline-none font-mono"
+                        />
+                        <input
+                          type="text"
+                          placeholder="가져올 값 필드"
+                          value={col.joinValueField ?? ''}
+                          onChange={e => updateEditingColumn(idx, { joinValueField: e.target.value })}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg text-[12px] bg-white/[0.05] border border-white/[0.06] text-white placeholder-white/20 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CALCULATED 설정 */}
+                  {col.colType === 'CALCULATED' && (
+                    <input
+                      type="text"
+                      placeholder="수식 (예: {width_mm} * {depth_mm})"
+                      value={col.formula ?? ''}
+                      onChange={e => updateEditingColumn(idx, { formula: e.target.value })}
+                      className="w-full px-2.5 py-1.5 rounded-lg text-[12px] bg-white/[0.05] border border-white/[0.06] text-white placeholder-white/20 focus:outline-none font-mono"
+                    />
+                  )}
+                </div>
+              ))}
+
+              <button
+                onClick={addEditingColumn}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium bg-white/[0.04] text-white/50 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white/80 transition-all w-full justify-center"
+              >
+                <Plus size={14} />
+                컬럼 추가
+              </button>
+
+              <p className="text-[11px] text-white/25 leading-relaxed pt-1">
+                ※ 사용자 기입 컬럼만 셀에서 직접 편집 가능합니다. 저장 후 기존 행 데이터의 해당 필드는 유지됩니다.
+              </p>
+            </div>
+
+            {/* 푸터 */}
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-white/[0.08]">
+              <button
+                onClick={() => setShowColumnEditor(false)}
+                className="px-4 py-2 rounded-lg text-[13px] text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSaveColumns}
+                disabled={editingColumns.length === 0}
+                className="px-5 py-2 rounded-lg text-[13px] font-semibold bg-brand-500 text-white hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-glow-sm"
+              >
+                저장
               </button>
             </div>
           </div>

@@ -3,12 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Pencil, Search, Grid3x3, CalendarDays, X, ChevronRight,
-  ZoomIn, ZoomOut, RefreshCw, Zap,
+  ZoomIn, ZoomOut, RefreshCw, Zap, Layers, ChevronDown,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { PageLayout } from '../components/layout/PageLayout'
 import { EditorCanvas } from '../components/layout-editor/EditorCanvas'
 import { useLayoutStore } from '../stores/layoutStore'
+import { useLayoutEditorStore } from '../stores/layoutEditorStore'
 import { mockService } from '../services/mockData'
 
 type PanelTab = 'search' | 'groups' | 'date' | 'optimize' | null
@@ -35,9 +36,23 @@ export const LayoutViewPage: React.FC = () => {
   const [newGroupInput, setNewGroupInput] = useState('')
   const [newGroupColor, setNewGroupColor] = useState(GROUP_COLORS[0])
   const [isOptimizing, setIsOptimizing] = useState(false)
+  const [showLayerPanel, setShowLayerPanel] = useState(false)
+  const layerPanelRef = useRef<HTMLDivElement>(null)
 
   const { layouts } = useLayoutStore()
   const layout = layouts.find(l => l.id === id)
+  const { clickableLayer, setClickableLayer } = useLayoutEditorStore()
+
+  // 레이어 패널 외부 클릭 시 닫기
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (layerPanelRef.current && !layerPanelRef.current.contains(e.target as Node)) {
+        setShowLayerPanel(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const { data: equipment = [], isLoading } = useQuery({
     queryKey: ['equipment'],
@@ -106,7 +121,7 @@ export const LayoutViewPage: React.FC = () => {
 
   return (
     <PageLayout fullWidth>
-      <div className="flex h-full">
+      <div className="flex" style={{ height: 'calc(100vh - 60px)' }}>
         {/* Canvas 영역 */}
         <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-50">
           {isLoading ? (
@@ -178,6 +193,62 @@ export const LayoutViewPage: React.FC = () => {
               active={activePanel === 'optimize'}
               onClick={() => setActivePanel(p => p === 'optimize' ? null : 'optimize')}
             />
+          </div>
+
+          {/* 클릭 반응 레이어 설정 */}
+          <div className="px-3 py-2.5 border-b border-gray-100">
+            <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-1.5">클릭 반응 레이어</p>
+            <div ref={layerPanelRef} className="relative">
+              {(() => {
+                const layerOptions = [
+                  { value: 'equipment', label: '설비' },
+                  { value: 'facility', label: '시설물' },
+                  { value: 'zone', label: '배치 영역' },
+                  { value: 'rail', label: 'OHT 레일' },
+                  ...(layout.customLayers ?? []).map(cl => ({ value: cl.id, label: cl.name })),
+                ]
+                const currentLabel = layerOptions.find(o => o.value === clickableLayer)?.label ?? clickableLayer
+                return (
+                  <>
+                    <button
+                      onClick={() => setShowLayerPanel(v => !v)}
+                      className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold transition-colors border ${
+                        showLayerPanel
+                          ? 'bg-blue-50 text-blue-700 border-blue-300'
+                          : 'text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Layers size={13} />
+                      <span className="flex-1 text-left">{currentLabel}</span>
+                      <ChevronDown size={11} className={`transition-transform ${showLayerPanel ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showLayerPanel && (
+                      <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl shadow-xl overflow-hidden" style={{ background: '#1E293B', border: '1px solid #334155' }}>
+                        <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#64748b' }}>클릭 반응 레이어</p>
+                        {layerOptions.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => { setClickableLayer(opt.value); setShowLayerPanel(false) }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left transition-colors hover:bg-slate-700"
+                            style={{ color: clickableLayer === opt.value ? '#60a5fa' : '#cbd5e1' }}
+                          >
+                            <span
+                              className="w-3 h-3 rounded-full border-2 shrink-0"
+                              style={{
+                                borderColor: clickableLayer === opt.value ? '#3b82f6' : '#475569',
+                                background: clickableLayer === opt.value ? '#3b82f6' : 'transparent',
+                              }}
+                            />
+                            {opt.label}
+                          </button>
+                        ))}
+                        <div className="h-2" />
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
           </div>
 
           {/* 기능 패널 내용 */}

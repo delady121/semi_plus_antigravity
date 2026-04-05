@@ -2,13 +2,14 @@ import React from 'react'
 import {
   MousePointer2, Move, Square, Circle, Type, ArrowRight,
   ZoomIn, ZoomOut, Save, Send, RotateCcw, RotateCw,
-  LayoutGrid, Spline,
+  LayoutGrid, Spline, SlidersHorizontal, Magnet,
 } from 'lucide-react'
 import { useLayoutEditorStore } from '../../stores/layoutEditorStore'
 
 interface Props {
   onSave: () => void
   onRequestReview: () => void
+  onProperties?: () => void
 }
 
 type ToolMode = 'select' | 'move' | 'rect' | 'circle' | 'text' | 'arrow' | 'zone' | 'oht'
@@ -24,8 +25,8 @@ const tools: { mode: ToolMode; icon: React.ReactNode; label: string }[] = [
   { mode: 'arrow', icon: <ArrowRight size={16} />, label: '화살표' },
 ]
 
-export const EditorToolbar: React.FC<Props> = ({ onSave, onRequestReview }) => {
-  const { toolMode, setToolMode, zoomLevel, setZoomLevel, undo, redo, isDirty } = useLayoutEditorStore()
+export const EditorToolbar: React.FC<Props> = ({ onSave, onRequestReview, onProperties }) => {
+  const { toolMode, setToolMode, zoomLevel, setZoomLevel, undo, redo, isDirty, snapEnabled, setSnapEnabled } = useLayoutEditorStore()
 
   const handleZoomIn = () => setZoomLevel(Math.min(4.0, zoomLevel + 0.1))
   const handleZoomOut = () => setZoomLevel(Math.max(0.1, zoomLevel - 0.1))
@@ -73,6 +74,22 @@ export const EditorToolbar: React.FC<Props> = ({ onSave, onRequestReview }) => {
 
       <div className="w-px h-6 bg-gray-200 mx-1" />
 
+      {/* Snap Toggle */}
+      <button
+        onClick={() => setSnapEnabled(!snapEnabled)}
+        title={`스냅핑 ${snapEnabled ? 'ON' : 'OFF'} (꼭지점 스냅)`}
+        className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+          snapEnabled
+            ? 'bg-blue-100 text-blue-700 border border-blue-300'
+            : 'text-gray-400 border border-gray-200 hover:bg-gray-100'
+        }`}
+      >
+        <Magnet size={14} />
+        스냅
+      </button>
+
+      <div className="w-px h-6 bg-gray-200 mx-1" />
+
       {/* Zoom Controls */}
       <div className="flex items-center gap-0.5 border border-gray-200 rounded-lg p-0.5">
         <button onClick={handleZoomOut} title="축소" className="p-1.5 rounded hover:bg-gray-100 text-gray-600">
@@ -90,6 +107,20 @@ export const EditorToolbar: React.FC<Props> = ({ onSave, onRequestReview }) => {
       </div>
 
       <div className="flex-1" />
+
+      {/* Properties Button */}
+      {onProperties && (
+        <>
+          <button
+            onClick={onProperties}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors"
+          >
+            <SlidersHorizontal size={15} />
+            속성
+          </button>
+          <div className="w-px h-6 bg-gray-200 mx-1" />
+        </>
+      )}
 
       {/* Right Side Actions */}
       <button

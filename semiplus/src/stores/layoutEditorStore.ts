@@ -3,6 +3,15 @@ import type { FabBay, EquipmentPlacement, CustomShape, LayerData } from '../type
 
 type ToolMode = 'select' | 'move' | 'rect' | 'circle' | 'text' | 'arrow' | 'zone' | 'oht'
 
+export interface GeneratedEquipment {
+  id: string
+  label: string   // EQP_ID 값
+  x: number       // Xmin
+  y: number       // Ymin
+  width: number   // Xmax - Xmin
+  height: number  // Ymax - Ymin
+}
+
 interface HistoryState {
   placements: EquipmentPlacement[]
   customShapes: CustomShape[]
@@ -14,12 +23,18 @@ interface LayoutEditorState {
   selectedEquipmentIds: string[]
   placements: EquipmentPlacement[]
   customShapes: CustomShape[]
+  generatedEquipments: GeneratedEquipment[]
+  generatedFacilities: GeneratedEquipment[]
   toolMode: ToolMode
   zoomLevel: number
   canvasOffset: { x: number; y: number }
   historyStack: HistoryState[]
   historyIndex: number
   isDirty: boolean
+  highlightedZoneId: string | null
+  highlightedRailId: string | null
+  snapEnabled: boolean
+  clickableLayer: string
 
   setCurrentBay: (bay: FabBay | null) => void
   setLayers: (layers: LayerData[]) => void
@@ -33,6 +48,13 @@ interface LayoutEditorState {
   removePlacement: (id: string) => void
   setCustomShapes: (shapes: CustomShape[]) => void
   addCustomShape: (shape: CustomShape) => void
+  setGeneratedEquipments: (equips: GeneratedEquipment[]) => void
+  updateGeneratedEquipment: (id: string, updates: Partial<GeneratedEquipment>) => void
+  setGeneratedFacilities: (facilities: GeneratedEquipment[]) => void
+  setHighlightedZoneId: (id: string | null) => void
+  setHighlightedRailId: (id: string | null) => void
+  setSnapEnabled: (enabled: boolean) => void
+  setClickableLayer: (layer: string) => void
   setToolMode: (mode: ToolMode) => void
   setZoomLevel: (zoom: number) => void
   setCanvasOffset: (offset: { x: number; y: number }) => void
@@ -59,7 +81,13 @@ export const useLayoutEditorStore = create<LayoutEditorState>((set, get) => ({
   selectedEquipmentIds: [],
   placements: [],
   customShapes: [],
+  generatedEquipments: [],
+  generatedFacilities: [],
   toolMode: 'select',
+  highlightedZoneId: null,
+  highlightedRailId: null,
+  snapEnabled: true,
+  clickableLayer: 'equipment',
   zoomLevel: 1.0,
   canvasOffset: { x: 0, y: 0 },
   historyStack: [],
@@ -115,6 +143,24 @@ export const useLayoutEditorStore = create<LayoutEditorState>((set, get) => ({
     set(state => ({ customShapes: [...state.customShapes, shape], isDirty: true }))
   },
 
+  setGeneratedEquipments: (equips) => set({ generatedEquipments: equips }),
+
+  updateGeneratedEquipment: (id, updates) => set(state => ({
+    generatedEquipments: state.generatedEquipments.map(eq =>
+      eq.id === id ? { ...eq, ...updates } : eq
+    ),
+  })),
+
+  setGeneratedFacilities: (facilities) => set({ generatedFacilities: facilities }),
+
+  setHighlightedZoneId: (id) => set({ highlightedZoneId: id }),
+
+  setHighlightedRailId: (id) => set({ highlightedRailId: id }),
+
+  setSnapEnabled: (enabled) => set({ snapEnabled: enabled }),
+
+  setClickableLayer: (layer) => set({ clickableLayer: layer }),
+
   setToolMode: (mode) => set({ toolMode: mode }),
 
   setZoomLevel: (zoom) => set({ zoomLevel: Math.min(4.0, Math.max(0.1, zoom)) }),
@@ -164,7 +210,13 @@ export const useLayoutEditorStore = create<LayoutEditorState>((set, get) => ({
     selectedEquipmentIds: [],
     placements: [],
     customShapes: [],
+    generatedEquipments: [],
+    generatedFacilities: [],
     toolMode: 'select',
+    highlightedZoneId: null,
+    highlightedRailId: null,
+    snapEnabled: true,
+    clickableLayer: 'equipment',
     zoomLevel: 1.0,
     canvasOffset: { x: 0, y: 0 },
     historyStack: [],
