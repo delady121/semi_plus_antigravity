@@ -119,6 +119,7 @@ export const LayoutViewPage: React.FC = () => {
               containerWidth={canvasSize.w}
               containerHeight={canvasSize.h}
               readonly
+              layout={layout}
             />
           )}
 

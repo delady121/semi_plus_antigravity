@@ -1,7 +1,8 @@
 import React from 'react'
 import {
   MousePointer2, Move, Square, Circle, Type, ArrowRight,
-  ZoomIn, ZoomOut, Save, Send, RotateCcw, RotateCw
+  ZoomIn, ZoomOut, Save, Send, RotateCcw, RotateCw,
+  LayoutGrid, Spline,
 } from 'lucide-react'
 import { useLayoutEditorStore } from '../../stores/layoutEditorStore'
 
@@ -10,11 +11,13 @@ interface Props {
   onRequestReview: () => void
 }
 
-type ToolMode = 'select' | 'move' | 'rect' | 'circle' | 'text' | 'arrow'
+type ToolMode = 'select' | 'move' | 'rect' | 'circle' | 'text' | 'arrow' | 'zone' | 'oht'
 
 const tools: { mode: ToolMode; icon: React.ReactNode; label: string }[] = [
   { mode: 'select', icon: <MousePointer2 size={16} />, label: '선택' },
   { mode: 'move', icon: <Move size={16} />, label: '이동' },
+  { mode: 'zone', icon: <LayoutGrid size={16} />, label: '배치영역' },
+  { mode: 'oht', icon: <Spline size={16} />, label: 'OHT 레일' },
   { mode: 'rect', icon: <Square size={16} />, label: '사각형' },
   { mode: 'circle', icon: <Circle size={16} />, label: '원' },
   { mode: 'text', icon: <Type size={16} />, label: '텍스트' },

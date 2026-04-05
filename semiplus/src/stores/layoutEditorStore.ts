@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { FabBay, EquipmentPlacement, CustomShape, LayerData } from '../types'
 
-type ToolMode = 'select' | 'move' | 'rect' | 'circle' | 'text' | 'arrow'
+type ToolMode = 'select' | 'move' | 'rect' | 'circle' | 'text' | 'arrow' | 'zone' | 'oht'
 
 interface HistoryState {
   placements: EquipmentPlacement[]

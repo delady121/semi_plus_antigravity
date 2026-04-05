@@ -164,6 +164,50 @@ export const mockComments: Comment[] = [
 ]
 
 // ──────────────────────────────────────────────
+// Layout Layer Tables (Mock — 사내망 이관 시 교체)
+// [사내망 이관 시 교체] 실제 사내 Datalake 테이블 목록 API로 교체 필요
+// ──────────────────────────────────────────────
+export interface MockTableInfo {
+  id: string
+  name: string
+  description: string
+  columns: string[]
+}
+
+export const mockLayoutTables: MockTableInfo[] = [
+  {
+    id: 'EQP_LAYOUT_MASTER',
+    name: 'EQP_LAYOUT_MASTER',
+    description: '설비 좌표 마스터 테이블',
+    columns: ['EQP_ID', 'EQP_NAME', 'X_MAX', 'X_MIN', 'Y_MAX', 'Y_MIN', 'FLOOR', 'BAY_ID', 'STATUS', 'INSTALL_DATE'],
+  },
+  {
+    id: 'EQP_LAYOUT_PLAN',
+    name: 'EQP_LAYOUT_PLAN',
+    description: '설비 배치 계획 테이블',
+    columns: ['PLAN_ID', 'EQP_ID', 'EQP_NO', 'X_MAX', 'X_MIN', 'Y_MAX', 'Y_MIN', 'PLAN_DATE', 'STATUS', 'REMARK'],
+  },
+  {
+    id: 'FACILITY_MASTER',
+    name: 'FACILITY_MASTER',
+    description: '시설물(기둥/계단 등) 마스터 테이블',
+    columns: ['FACILITY_ID', 'FACILITY_NAME', 'FACILITY_TYPE', 'X_MAX', 'X_MIN', 'Y_MAX', 'Y_MIN', 'FLOOR'],
+  },
+  {
+    id: 'EQP_SPEC_TABLE',
+    name: 'EQP_SPEC_TABLE',
+    description: '설비 제원 테이블',
+    columns: ['EQP_ID', 'EQP_NO', 'MODEL', 'WIDTH_MM', 'DEPTH_MM', 'HEIGHT_MM', 'WEIGHT_KG', 'PROCESS_TYPE'],
+  },
+  {
+    id: 'FAB_ZONE_TABLE',
+    name: 'FAB_ZONE_TABLE',
+    description: 'FAB 구역 정보 테이블',
+    columns: ['ZONE_ID', 'ZONE_NAME', 'ZONE_TYPE', 'X_MAX', 'X_MIN', 'Y_MAX', 'Y_MIN', 'CLEAN_CLASS', 'FLOOR'],
+  },
+]
+
+// ──────────────────────────────────────────────
 // Simulated async service (200ms delay)
 // ──────────────────────────────────────────────
 const delay = (ms = 200) => new Promise<void>(r => setTimeout(r, ms))
@@ -186,5 +230,12 @@ export const mockService = {
   getComments: async (planId?: string) => {
     await delay()
     return planId ? mockComments.filter(c => c.plan_id === planId) : [...mockComments]
+  },
+  // [사내망 이관 시 교체] 사내 Datalake 테이블 목록 API로 교체 필요
+  getLayoutTables: async () => { await delay(100); return [...mockLayoutTables] },
+  // [사내망 이관 시 교체] 사내 Datalake 테이블 컬럼 조회 API로 교체 필요
+  getTableColumns: async (tableId: string) => {
+    await delay(100)
+    return mockLayoutTables.find(t => t.id === tableId)?.columns ?? []
   },
 }

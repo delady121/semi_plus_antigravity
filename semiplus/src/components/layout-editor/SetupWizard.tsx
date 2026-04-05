@@ -1,9 +1,11 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   CheckCircle2, Circle, ImageUp, Ruler, Grid3x3, SquareDashed,
-  Route, Cpu, Building2, Plus, Trash2, ChevronRight, Info,
+  Route, Cpu, Building2, Plus, Trash2, ChevronRight, Info, Search, ChevronDown,
 } from 'lucide-react'
 import type { LayoutItem, ScaleMeasurement } from '../../stores/layoutStore'
+import { mockService } from '../../services/mockData'
+import type { MockTableInfo } from '../../services/mockData'
 
 interface Props {
   layout: LayoutItem
@@ -376,36 +378,156 @@ const Step7: React.FC = () => (
 
 // ── Step 8: 설비 레이어 ────────────────────────────────────────
 
+// 검색 가능한 테이블 드롭다운
+const TableSearchDropdown: React.FC<{
+  value: string
+  tables: MockTableInfo[]
+  onChange: (tableId: string) => void
+}> = ({ value, tables, onChange }) => {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  const filtered = tables.filter(t =>
+    t.name.toLowerCase().includes(query.toLowerCase()) ||
+    t.description.includes(query)
+  )
+  const selected = tables.find(t => t.id === value)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] border border-gray-200 hover:border-blue-400 focus:outline-none focus:border-blue-400 bg-white text-left font-mono"
+      >
+        <span className={`flex-1 truncate ${selected ? 'text-gray-800' : 'text-gray-400'}`}>
+          {selected ? selected.name : '테이블 선택...'}
+        </span>
+        <ChevronDown size={12} className="text-gray-400 shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          <div className="p-1.5 border-b border-gray-100">
+            <div className="relative">
+              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                autoFocus
+                type="text"
+                placeholder="테이블 검색..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className="w-full pl-6 pr-2 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400"
+              />
+            </div>
+          </div>
+          <div className="max-h-40 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="text-[11px] text-gray-400 text-center py-3">검색 결과 없음</p>
+            ) : filtered.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { onChange(t.id); setOpen(false); setQuery('') }}
+                className={`w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors ${t.id === value ? 'bg-blue-50 text-blue-700' : ''}`}
+              >
+                <p className="text-[12px] font-mono font-semibold text-gray-800">{t.name}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{t.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 컬럼 드롭다운
+const ColumnDropdown: React.FC<{
+  label: string
+  value: string
+  columns: string[]
+  onChange: (v: string) => void
+  required?: boolean
+}> = ({ label, value, columns, onChange, required }) => (
+  <div>
+    <label className="text-[10px] text-gray-400 font-semibold uppercase block mb-0.5">
+      {label}{required && <span className="text-red-400 ml-0.5">*</span>}
+    </label>
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      disabled={columns.length === 0}
+      className="w-full px-2.5 py-1.5 rounded-lg text-[12px] border border-gray-200 focus:outline-none focus:border-blue-400 font-mono bg-white disabled:bg-gray-50 disabled:text-gray-400"
+    >
+      <option value="">-- 컬럼 선택 --</option>
+      {columns.map(col => (
+        <option key={col} value={col}>{col}</option>
+      ))}
+    </select>
+  </div>
+)
+
 const LayerConfigForm: React.FC<{
   config: LayoutItem['equipmentLayerConfig']
   onUpdate: (c: NonNullable<LayoutItem['equipmentLayerConfig']>) => void
   showEqpId?: boolean
 }> = ({ config, onUpdate, showEqpId = true }) => {
+  const [tables, setTables] = useState<MockTableInfo[]>([])
+  const [columns, setColumns] = useState<string[]>([])
   const c = config ?? { tableId: '', xmaxField: '', xminField: '', ymaxField: '', yminField: '', eqpIdField: '', extraFields: [] }
+
+  // 테이블 목록 로드
+  // [사내망 이관 시 교체] 실제 API 엔드포인트로 교체 필요
+  useEffect(() => {
+    mockService.getLayoutTables().then(setTables)
+  }, [])
+
+  // 선택된 테이블의 컬럼 로드
+  useEffect(() => {
+    if (!c.tableId) { setColumns([]); return }
+    mockService.getTableColumns(c.tableId).then(setColumns)
+  }, [c.tableId])
+
   const update = (key: string, val: string) => onUpdate({ ...c, [key]: val })
 
-  const fields = [
-    { key: 'tableId',   label: '테이블 선택', placeholder: '테이블 이름 또는 ID' },
-    { key: 'xmaxField', label: 'Xmax 컬럼',  placeholder: 'x_max' },
-    { key: 'xminField', label: 'Xmin 컬럼',  placeholder: 'x_min' },
-    { key: 'ymaxField', label: 'Ymax 컬럼',  placeholder: 'y_max' },
-    { key: 'yminField', label: 'Ymin 컬럼',  placeholder: 'y_min' },
-    ...(showEqpId ? [{ key: 'eqpIdField', label: 'EQP_ID 컬럼', placeholder: 'equipment_no' }] : []),
+  const columnFields = [
+    { key: 'xmaxField', label: 'Xmax 컬럼' },
+    { key: 'xminField', label: 'Xmin 컬럼' },
+    { key: 'ymaxField', label: 'Ymax 컬럼' },
+    { key: 'yminField', label: 'Ymin 컬럼' },
+    ...(showEqpId ? [{ key: 'eqpIdField', label: 'EQP_ID 컬럼' }] : []),
   ]
 
   return (
-    <div className="space-y-2">
-      {fields.map(f => (
-        <div key={f.key}>
-          <label className="text-[10px] text-gray-400 font-semibold uppercase block mb-0.5">{f.label}</label>
-          <input
-            type="text"
-            placeholder={f.placeholder}
-            value={(c as Record<string, string>)[f.key] ?? ''}
-            onChange={e => update(f.key, e.target.value)}
-            className="w-full px-2.5 py-1.5 rounded-lg text-[12px] border border-gray-200 focus:outline-none focus:border-blue-400 font-mono"
-          />
-        </div>
+    <div className="space-y-2.5">
+      <div>
+        <label className="text-[10px] text-gray-400 font-semibold uppercase block mb-0.5">
+          테이블 선택<span className="text-red-400 ml-0.5">*</span>
+        </label>
+        <TableSearchDropdown
+          value={c.tableId}
+          tables={tables}
+          onChange={tableId => onUpdate({ ...c, tableId, xmaxField: '', xminField: '', ymaxField: '', yminField: '', eqpIdField: '' })}
+        />
+      </div>
+      {columnFields.map(f => (
+        <ColumnDropdown
+          key={f.key}
+          label={f.label}
+          value={(c as Record<string, string>)[f.key] ?? ''}
+          columns={columns}
+          onChange={v => update(f.key, v)}
+          required
+        />
       ))}
     </div>
   )

@@ -3,7 +3,7 @@ import { Stage, Layer, Rect, Line, Text, Circle, Arrow, Group, Image as KonvaIma
 import type Konva from 'konva'
 import { useLayoutEditorStore } from '../../stores/layoutEditorStore'
 import type { Equipment, EquipmentPlacement } from '../../types'
-import type { LayoutItem } from '../../stores/layoutStore'
+import type { LayoutItem, PlacementZone, OhtRailSegment } from '../../stores/layoutStore'
 
 interface Props {
   equipment: Equipment[]
@@ -11,6 +11,7 @@ interface Props {
   containerHeight: number
   readonly?: boolean
   layout?: LayoutItem
+  onUpdateLayout?: (updates: Partial<LayoutItem>) => void
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -23,8 +24,21 @@ const STATUS_COLORS: Record<string, string> = {
 const DEFAULT_CANVAS_W = 3000
 const DEFAULT_CANVAS_H = 2000
 
+// 두 좌표 사이 각도를 45° 단위로 스냅한 끝점 반환
+function snap45(x1: number, y1: number, x2: number, y2: number): { x: number; y: number } {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const angle = Math.atan2(dy, dx)
+  const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  return {
+    x: x1 + Math.cos(snapped) * dist,
+    y: y1 + Math.sin(snapped) * dist,
+  }
+}
+
 export const EditorCanvas: React.FC<Props> = ({
-  equipment, containerWidth, containerHeight, readonly = false, layout,
+  equipment, containerWidth, containerHeight, readonly = false, layout, onUpdateLayout,
 }) => {
   const {
     layers, placements, customShapes,
@@ -38,6 +52,14 @@ export const EditorCanvas: React.FC<Props> = ({
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
   const [canvasNativeSize, setCanvasNativeSize] = useState({ w: DEFAULT_CANVAS_W, h: DEFAULT_CANVAS_H })
+
+  // 배치영역 드래그 드로잉 상태
+  const [zoneDrawStart, setZoneDrawStart] = useState<{ x: number; y: number } | null>(null)
+  const [zoneDrawCurrent, setZoneDrawCurrent] = useState<{ x: number; y: number } | null>(null)
+
+  // OHT 레일 드로잉 상태
+  const [ohtPoints, setOhtPoints] = useState<number[]>([])  // 확정된 꺾임점 목록
+  const [ohtPreview, setOhtPreview] = useState<{ x: number; y: number } | null>(null)  // 마우스 위치 프리뷰
 
   const isLayerVisible = (code: string) => layers.find(l => l.code === code)?.visible ?? true
   const isLayerLocked = (code: string) => layers.find(l => l.code === code)?.locked ?? false
@@ -88,21 +110,104 @@ export const EditorCanvas: React.FC<Props> = ({
     }
   }
 
-  // Stage click (deselect)
+  // 스테이지 포인터 → 캔버스 월드 좌표 변환
+  const getCanvasPos = useCallback((): { x: number; y: number } | null => {
+    const pos = stageRef.current?.getRelativePointerPosition()
+    return pos ? { x: pos.x, y: pos.y } : null
+  }, [])
+
+  // Stage click (deselect, 또는 OHT 점 추가)
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (e.target === stageRef.current || e.target.getClassName() === 'Stage') {
+    if (readonly) return
+    const isStageTarget = e.target === stageRef.current || e.target.getClassName() === 'Stage'
+
+    if (toolMode === 'oht') {
+      // 더블클릭은 handleStageDblClick에서 처리하므로 단순 클릭만
+      if (e.evt.detail > 1) return
+      const pos = getCanvasPos()
+      if (!pos) return
+      if (ohtPoints.length >= 2) {
+        const lastX = ohtPoints[ohtPoints.length - 2]
+        const lastY = ohtPoints[ohtPoints.length - 1]
+        const snapped = snap45(lastX, lastY, pos.x, pos.y)
+        setOhtPoints(prev => [...prev, snapped.x, snapped.y])
+      } else {
+        setOhtPoints(prev => [...prev, pos.x, pos.y])
+      }
+      return
+    }
+
+    if (isStageTarget && toolMode === 'select') {
       setSelectedEquipmentIds([])
     }
   }
 
-  // Mouse move (HUD)
-  const handleMouseMove = (_e: Konva.KonvaEventObject<MouseEvent>) => {
-    const pos = stageRef.current?.getPointerPosition()
-    if (pos) {
-      setMousePos({
-        x: Math.round((pos.x - canvasOffset.x) / zoomLevel * 10),
-        y: Math.round((pos.y - canvasOffset.y) / zoomLevel * 10),
+  // OHT 레일 완성 (더블클릭)
+  const handleStageDblClick = (_e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (readonly || toolMode !== 'oht') return
+    if (ohtPoints.length >= 4) {
+      const newRail: OhtRailSegment = {
+        id: `rail_${Date.now()}`,
+        points: ohtPoints,
+      }
+      onUpdateLayout?.({
+        ohtRails: [...(layout?.ohtRails ?? []), newRail],
       })
+    }
+    setOhtPoints([])
+    setOhtPreview(null)
+  }
+
+  // Mouse down — 배치영역 드래그 시작
+  const handleMouseDown = (_e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (readonly || toolMode !== 'zone') return
+    const pos = getCanvasPos()
+    if (!pos) return
+    setZoneDrawStart(pos)
+    setZoneDrawCurrent(pos)
+  }
+
+  // Mouse up — 배치영역 확정
+  const handleMouseUp = (_e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (readonly || toolMode !== 'zone') return
+    if (!zoneDrawStart || !zoneDrawCurrent) return
+    const x = Math.min(zoneDrawStart.x, zoneDrawCurrent.x)
+    const y = Math.min(zoneDrawStart.y, zoneDrawCurrent.y)
+    const width = Math.abs(zoneDrawCurrent.x - zoneDrawStart.x)
+    const height = Math.abs(zoneDrawCurrent.y - zoneDrawStart.y)
+    if (width > 10 && height > 10) {
+      const newZone: PlacementZone = {
+        id: `zone_${Date.now()}`,
+        x, y, width, height,
+        label: `배치영역 ${(layout?.placementZones?.length ?? 0) + 1}`,
+      }
+      onUpdateLayout?.({
+        placementZones: [...(layout?.placementZones ?? []), newZone],
+      })
+    }
+    setZoneDrawStart(null)
+    setZoneDrawCurrent(null)
+  }
+
+  // Mouse move (HUD + 드로잉 프리뷰)
+  const handleMouseMove = (_e: Konva.KonvaEventObject<MouseEvent>) => {
+    const rawPos = stageRef.current?.getPointerPosition()
+    if (rawPos) {
+      setMousePos({
+        x: Math.round((rawPos.x - canvasOffset.x) / zoomLevel * 10),
+        y: Math.round((rawPos.y - canvasOffset.y) / zoomLevel * 10),
+      })
+    }
+    const pos = getCanvasPos()
+    if (!pos) return
+    if (toolMode === 'zone' && zoneDrawStart) {
+      setZoneDrawCurrent(pos)
+    }
+    if (toolMode === 'oht' && ohtPoints.length >= 2) {
+      const lastX = ohtPoints[ohtPoints.length - 2]
+      const lastY = ohtPoints[ohtPoints.length - 1]
+      const snapped = snap45(lastX, lastY, pos.x, pos.y)
+      setOhtPreview(snapped)
     }
   }
 
@@ -150,6 +255,20 @@ export const EditorCanvas: React.FC<Props> = ({
     updatePlacement(placement.id, { x: snapX, y: snapY })
   }
 
+  // Escape — OHT 드로잉 취소
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOhtPoints([])
+        setOhtPreview(null)
+        setZoneDrawStart(null)
+        setZoneDrawCurrent(null)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -195,6 +314,9 @@ export const EditorCanvas: React.FC<Props> = ({
         onWheel={handleWheel}
         onDragEnd={handleStageDragEnd}
         onClick={handleStageClick}
+        onDblClick={handleStageDblClick}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
       >
         {/* L1: 배경 이미지 또는 기본 배경 */}
@@ -397,6 +519,61 @@ export const EditorCanvas: React.FC<Props> = ({
               }
               return null
             })}
+          </Layer>
+        )}
+        {/* 드로잉 프리뷰 레이어 (배치영역 / OHT 레일) */}
+        {!readonly && (
+          <Layer>
+            {/* 배치영역 드래그 프리뷰 */}
+            {toolMode === 'zone' && zoneDrawStart && zoneDrawCurrent && (
+              <Rect
+                x={Math.min(zoneDrawStart.x, zoneDrawCurrent.x)}
+                y={Math.min(zoneDrawStart.y, zoneDrawCurrent.y)}
+                width={Math.abs(zoneDrawCurrent.x - zoneDrawStart.x)}
+                height={Math.abs(zoneDrawCurrent.y - zoneDrawStart.y)}
+                fill="#eff6ff"
+                stroke="#3b82f6"
+                strokeWidth={1.5}
+                opacity={0.6}
+                dash={[6, 3]}
+              />
+            )}
+            {/* OHT 레일 드로잉 중 확정 경로 */}
+            {toolMode === 'oht' && ohtPoints.length >= 4 && (
+              <Line
+                points={ohtPoints}
+                stroke="#f97316"
+                strokeWidth={4}
+                opacity={0.9}
+                lineCap="round"
+                lineJoin="round"
+              />
+            )}
+            {/* OHT 레일 프리뷰 (마지막 점 → 현재 마우스) */}
+            {toolMode === 'oht' && ohtPoints.length >= 2 && ohtPreview && (
+              <Line
+                points={[
+                  ohtPoints[ohtPoints.length - 2],
+                  ohtPoints[ohtPoints.length - 1],
+                  ohtPreview.x,
+                  ohtPreview.y,
+                ]}
+                stroke="#f97316"
+                strokeWidth={2}
+                opacity={0.5}
+                dash={[8, 4]}
+                lineCap="round"
+              />
+            )}
+            {/* OHT 첫 점 마커 */}
+            {toolMode === 'oht' && ohtPoints.length >= 2 && (
+              <Circle
+                x={ohtPoints[0]} y={ohtPoints[1]}
+                radius={5}
+                fill="#f97316"
+                opacity={0.8}
+              />
+            )}
           </Layer>
         )}
       </Stage>
