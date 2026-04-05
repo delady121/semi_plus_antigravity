@@ -128,8 +128,9 @@ export const EditorCanvas: React.FC<Props> = ({
     const { x, y, w: rw, h: rh } = rect
     const inRect = (cx: number, cy: number) => cx >= x && cx <= x + rw && cy >= y && cy <= y + rh
     if (clickableLayer === 'equipment') {
-      const ids = placements.filter(p => inRect(p.x, p.y)).map(p => p.equipment_id)
-      setSelectedEquipmentIds(ids)
+      const placementIds = placements.filter(p => inRect(p.x, p.y)).map(p => p.equipment_id)
+      const genIds = generatedEquipments.filter(eq => inRect(eq.x + eq.width / 2, eq.y + eq.height / 2)).map(eq => eq.id)
+      setSelectedEquipmentIds([...placementIds, ...genIds])
       setSelectedZoneId(null)
       setSelectedRailId(null)
       setSelectedFacilityId(null)
@@ -157,7 +158,7 @@ export const EditorCanvas: React.FC<Props> = ({
       setSelectedZoneId(null)
       setSelectedRailId(null)
     }
-  }, [clickableLayer, placements, layout, generatedFacilities, setSelectedEquipmentIds])
+  }, [clickableLayer, placements, generatedEquipments, layout, generatedFacilities, setSelectedEquipmentIds])
 
   // OHT 그리기 중 스냅 대상 좌표 목록
   const snapTargets = useMemo(() => {
@@ -626,15 +627,18 @@ export const EditorCanvas: React.FC<Props> = ({
   }
 
   const handleEquipDragEnd = (placement: EquipmentPlacement, e: Konva.KonvaEventObject<DragEvent>) => {
-    const snapX = Math.round(e.target.x() / gridPx) * gridPx
-    const snapY = Math.round(e.target.y() / gridPx) * gridPx
+    const effectiveGrid = (gridPx > 0 && isFinite(gridPx)) ? gridPx : 1
+    const snapX = Math.round(e.target.x() / effectiveGrid) * effectiveGrid
+    const snapY = Math.round(e.target.y() / effectiveGrid) * effectiveGrid
     updatePlacement(placement.id, { x: snapX, y: snapY })
   }
 
   // 데이터 기반 생성 설비 드래그 이동 완료 — store 및 데이터 테이블 좌표 업데이트
   const handleGenEquipDragEnd = (eq: { id: string; label: string; x: number; y: number; width: number; height: number }, e: Konva.KonvaEventObject<DragEvent>) => {
-    const newX = Math.round(e.target.x() / gridPx) * gridPx
-    const newY = Math.round(e.target.y() / gridPx) * gridPx
+    const effectiveGrid = (gridPx > 0 && isFinite(gridPx)) ? gridPx : 1
+    const newX = Math.round(e.target.x() / effectiveGrid) * effectiveGrid
+    const newY = Math.round(e.target.y() / effectiveGrid) * effectiveGrid
+    if (!isFinite(newX) || !isFinite(newY)) return
     updateGeneratedEquipment(eq.id, { x: newX, y: newY })
     // [사내망 이관 시 교체] 설비 좌표 업데이트 실제 API로 교체 필요
     const cfg = layout?.equipmentLayerConfig
@@ -1056,30 +1060,44 @@ export const EditorCanvas: React.FC<Props> = ({
         {/* L5-GEN: 설비 레이어 데이터 기반 생성 설비 */}
         {isLayerVisible('L5') && generatedEquipments.length > 0 && (
           <Layer>
-            {generatedEquipments.map(eq => (
-              <Group
-                key={eq.id}
-                x={eq.x} y={eq.y}
-                draggable={!readonly && !isLayerLocked('L5')}
-                onDragEnd={e => handleGenEquipDragEnd(eq, e)}
-              >
-                <Rect
-                  width={eq.width} height={eq.height}
-                  fill="#3b82f620"
-                  stroke="#3b82f6"
-                  strokeWidth={1.5}
-                  cornerRadius={2}
-                />
-                <Text
-                  x={4} y={4}
-                  width={eq.width - 8}
-                  text={eq.label}
-                  fontSize={10}
-                  fill="#1d4ed8"
-                  ellipsis
-                />
-              </Group>
-            ))}
+            {generatedEquipments.map(eq => {
+              const isGenSelected = selectedEquipmentIds.includes(eq.id)
+              return (
+                <Group
+                  key={eq.id}
+                  x={eq.x} y={eq.y}
+                  draggable={!readonly && !isLayerLocked('L5')}
+                  onDragEnd={e => handleGenEquipDragEnd(eq, e)}
+                  onClick={e => {
+                    e.cancelBubble = true
+                    if (clickableLayer !== 'equipment') return
+                    if (e.evt.shiftKey) addSelectedEquipmentId(eq.id)
+                    else setSelectedEquipmentIds([eq.id])
+                    setSelectedZoneId(null)
+                    setSelectedRailId(null)
+                    setSelectedFacilityId(null)
+                  }}
+                >
+                  <Rect
+                    width={eq.width} height={eq.height}
+                    fill="#3b82f6"
+                    stroke={isGenSelected ? '#facc15' : '#3b82f6'}
+                    strokeWidth={isGenSelected ? 2.5 : 1.5}
+                    cornerRadius={2}
+                    shadowColor={isGenSelected ? '#facc15' : 'transparent'}
+                    shadowBlur={isGenSelected ? 8 : 0}
+                  />
+                  <Text
+                    x={4} y={4}
+                    width={eq.width - 8}
+                    text={eq.label}
+                    fontSize={10}
+                    fill="white"
+                    ellipsis
+                  />
+                </Group>
+              )
+            })}
           </Layer>
         )}
 
@@ -1137,17 +1155,7 @@ export const EditorCanvas: React.FC<Props> = ({
                 opacity={0.6} dash={[6, 3]}
               />
             )}
-            {/* 범위 선택 사각형 */}
-            {selectionRect && selectionRect.w > 2 && selectionRect.h > 2 && (
-              <Rect
-                x={selectionRect.x} y={selectionRect.y}
-                width={selectionRect.w} height={selectionRect.h}
-                fill="#3b82f610"
-                stroke="#3b82f6"
-                strokeWidth={1}
-                dash={[4, 3]}
-              />
-            )}
+            {/* 범위 선택 사각형 자리 — 공통 Layer로 이동됨 */}
             {/* 배치영역 시작점 마커 */}
             {toolMode === 'zone' && zoneDrawStart && (
               <Circle x={zoneDrawStart.x} y={zoneDrawStart.y} radius={4} fill="#3b82f6" opacity={0.9} />
@@ -1179,6 +1187,19 @@ export const EditorCanvas: React.FC<Props> = ({
                 <Circle x={snapIndicator.x} y={snapIndicator.y} radius={2} fill="#eab308" />
               </>
             )}
+          </Layer>
+        )}
+        {/* 범위 선택 사각형 (보기/편집 공통) */}
+        {selectionRect && selectionRect.w > 2 && selectionRect.h > 2 && (
+          <Layer listening={false}>
+            <Rect
+              x={selectionRect.x} y={selectionRect.y}
+              width={selectionRect.w} height={selectionRect.h}
+              fill="#3b82f610"
+              stroke="#3b82f6"
+              strokeWidth={1}
+              dash={[4, 3]}
+            />
           </Layer>
         )}
       </Stage>

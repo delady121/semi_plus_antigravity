@@ -8,6 +8,7 @@ import {
 import toast from 'react-hot-toast'
 import { PageLayout } from '../components/layout/PageLayout'
 import { EditorCanvas } from '../components/layout-editor/EditorCanvas'
+import { LayerPanel } from '../components/layout-editor/LayerPanel'
 import { useLayoutStore } from '../stores/layoutStore'
 import { useLayoutEditorStore } from '../stores/layoutEditorStore'
 import { mockService } from '../services/mockData'
@@ -122,6 +123,14 @@ export const LayoutViewPage: React.FC = () => {
   return (
     <PageLayout fullWidth>
       <div className="flex" style={{ height: 'calc(100vh - 60px)' }}>
+        {/* Left: 레이어 패널 */}
+        <div style={{ width: 200, minWidth: 200 }} className="flex flex-col overflow-hidden border-r border-gray-200 bg-white">
+          <LayerPanel
+            equipment={equipment}
+            onDragEquipment={() => {}}
+          />
+        </div>
+
         {/* Canvas 영역 */}
         <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-50">
           {isLoading ? (
