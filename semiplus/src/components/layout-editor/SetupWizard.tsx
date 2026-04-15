@@ -53,7 +53,7 @@ export const SetupWizard: React.FC<Props> = ({ layout, onUpdate, onComplete }) =
     >
       {/* 헤더 */}
       <div className="px-4 py-3.5 border-b border-gray-100 bg-slate-50">
-        <p className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold">초기 편집 설정</p>
+        <p className="text-[11px] text-gray-400 uppercase tracking-widest font-semibold">편집 설정</p>
         <p className="text-sm font-bold text-gray-800 mt-0.5">{layout.name}</p>
       </div>
 
@@ -145,10 +145,30 @@ const StepContent: React.FC<StepContentProps> = ({ layout, currentStep, onUpdate
   }
 }
 
-// ── Step 3: 배경 이미지 ──────────────────────────────────────
+// ── Step 3: 배경 영역 설정 ──────────────────────────────────
 
 const Step3: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) => void }> = ({ layout, onUpdate }) => {
   const inputRef = useRef<HTMLInputElement>(null)
+  const hasImage = !!layout.backgroundImageData
+  const hasCustomSize = !hasImage && (!!layout.canvasWidth || !!layout.canvasHeight)
+  const [mode, setMode] = useState<'image' | 'noimage'>(hasCustomSize ? 'noimage' : 'image')
+  const [customW, setCustomW] = useState(String(layout.canvasWidth ?? 3000))
+  const [customH, setCustomH] = useState(String(layout.canvasHeight ?? 2000))
+
+  const handleModeChange = (newMode: 'image' | 'noimage') => {
+    setMode(newMode)
+    if (newMode === 'noimage') {
+      onUpdate({ backgroundImageData: undefined, backgroundImageName: undefined })
+    }
+  }
+
+  const handleApplySize = () => {
+    const w = parseInt(customW)
+    const h = parseInt(customH)
+    if (w > 0 && h > 0) {
+      onUpdate({ canvasWidth: w, canvasHeight: h })
+    }
+  }
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -158,6 +178,8 @@ const Step3: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) =
       onUpdate({
         backgroundImageData: ev.target?.result as string,
         backgroundImageName: file.name,
+        canvasWidth: undefined,
+        canvasHeight: undefined,
       })
     }
     reader.readAsDataURL(file)
@@ -166,34 +188,91 @@ const Step3: React.FC<{ layout: LayoutItem; onUpdate: (u: Partial<LayoutItem>) =
   return (
     <div className="space-y-3">
       <StepHeader
-        title="배경 이미지 업로드"
-        desc="도면 PNG 또는 SVG 파일을 업로드하세요. 업로드된 이미지가 캔버스 배경이 됩니다."
+        title="배경 영역 설정"
+        desc="도면 배경을 이미지로 설정하거나, 가로/세로 크기를 직접 입력하세요."
       />
-      <div
-        className="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center hover:border-blue-300 hover:bg-blue-50/30 cursor-pointer transition-all"
-        onClick={() => inputRef.current?.click()}
-      >
-        <ImageUp size={28} className="mx-auto text-gray-300 mb-2" />
-        <p className="text-[13px] font-medium text-gray-500">클릭하여 파일 선택</p>
-        <p className="text-xs text-gray-400 mt-1">PNG, SVG 지원</p>
+      {/* 방식 선택 라디오 */}
+      <div className="flex gap-2">
+        <label className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border cursor-pointer text-xs font-medium transition-all ${mode === 'image' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+          <input type="radio" className="hidden" checked={mode === 'image'} onChange={() => handleModeChange('image')} />
+          <ImageUp size={13} />
+          이미지 업로드
+        </label>
+        <label className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border cursor-pointer text-xs font-medium transition-all ${mode === 'noimage' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+          <input type="radio" className="hidden" checked={mode === 'noimage'} onChange={() => handleModeChange('noimage')} />
+          이미지 없음
+        </label>
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".png,.svg,.jpg,.jpeg"
-        className="hidden"
-        onChange={handleFile}
-      />
-      {layout.backgroundImageData && (
-        <div className="rounded-xl overflow-hidden border border-emerald-200 bg-emerald-50 p-2">
-          <img
-            src={layout.backgroundImageData}
-            alt="preview"
-            className="w-full h-28 object-contain"
+
+      {/* 방식 A: 이미지 업로드 */}
+      {mode === 'image' && (
+        <>
+          <div
+            className="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center hover:border-blue-300 hover:bg-blue-50/30 cursor-pointer transition-all"
+            onClick={() => inputRef.current?.click()}
+          >
+            <ImageUp size={28} className="mx-auto text-gray-300 mb-2" />
+            <p className="text-[13px] font-medium text-gray-500">클릭하여 파일 선택</p>
+            <p className="text-xs text-gray-400 mt-1">PNG, SVG 지원</p>
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".png,.svg,.jpg,.jpeg"
+            className="hidden"
+            onChange={handleFile}
           />
-          <p className="text-[11px] text-emerald-600 font-medium mt-1.5 text-center">
-            ✓ {layout.backgroundImageName}
-          </p>
+          {layout.backgroundImageData && (
+            <div className="rounded-xl overflow-hidden border border-emerald-200 bg-emerald-50 p-2">
+              <img
+                src={layout.backgroundImageData}
+                alt="preview"
+                className="w-full h-28 object-contain"
+              />
+              <p className="text-[11px] text-emerald-600 font-medium mt-1.5 text-center">
+                ✓ {layout.backgroundImageName}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 방식 B: 이미지 없음 — 직접 크기 설정 */}
+      {mode === 'noimage' && (
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] text-gray-400 mb-1">가로 (px)</label>
+              <input
+                type="number"
+                min={100}
+                value={customW}
+                onChange={e => setCustomW(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-400 mb-1">세로 (px)</label>
+              <input
+                type="number"
+                min={100}
+                value={customH}
+                onChange={e => setCustomH(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:border-blue-400"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleApplySize}
+            className="w-full py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            크기 적용
+          </button>
+          {layout.canvasWidth && layout.canvasHeight && (
+            <p className="text-[11px] text-emerald-600 font-medium text-center">
+              ✓ {layout.canvasWidth} × {layout.canvasHeight} px
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -748,7 +827,7 @@ const Step11: React.FC<{ layout: LayoutItem }> = ({ layout }) => (
     />
     <div className="space-y-1.5 text-[12px]">
       {[
-        { label: '배경 이미지', done: !!layout.backgroundImageData },
+        { label: '배경 영역', done: !!layout.backgroundImageData || (!!layout.canvasWidth && !!layout.canvasHeight) },
         { label: '축척 설정',   done: !!layout.scaleMmPerPx },
         { label: '격자 생성',   done: layout.gridEnabled },
         { label: '설비 레이어', done: !!layout.equipmentLayerConfig?.tableId },

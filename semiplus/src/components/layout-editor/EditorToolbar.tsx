@@ -125,11 +125,7 @@ export const EditorToolbar: React.FC<Props> = ({ onSave, onRequestReview, onProp
       {/* Right Side Actions */}
       <button
         onClick={onSave}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-          isDirty
-            ? 'bg-blue-600 text-white hover:bg-blue-700'
-            : 'bg-gray-100 text-gray-500 cursor-default'
-        }`}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-blue-600 text-white hover:bg-blue-700"
       >
         <Save size={15} />
         저장{isDirty ? ' *' : ''}

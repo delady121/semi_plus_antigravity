@@ -36,9 +36,11 @@ export interface LayoutItem {
   // 초기 편집 프로세스 단계 (3~11, 11=완료)
   setupStep: number
   isSetupComplete: boolean
-  // Step 3: 배경 이미지
+  // Step 3: 배경 이미지 또는 직접 크기 설정
   backgroundImageData?: string   // base64 data URL
   backgroundImageName?: string
+  canvasWidth?: number            // 이미지 없음 선택 시 직접 입력한 가로 크기(px)
+  canvasHeight?: number           // 이미지 없음 선택 시 직접 입력한 세로 크기(px)
   // Step 4: 축척 설정 (3회 반복 측정)
   scaleMeasurements: ScaleMeasurement[]
   scaleMmPerPx?: number          // 3회 평균값

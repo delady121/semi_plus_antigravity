@@ -1,11 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { RefreshCw, Eye, Settings2, X, Check } from 'lucide-react'
+import { RefreshCw, Eye, X, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { PageLayout } from '../components/layout/PageLayout'
-import { LayerPanel } from '../components/layout-editor/LayerPanel'
-import { PropertiesPanel } from '../components/layout-editor/PropertiesPanel'
 import { EditorCanvas } from '../components/layout-editor/EditorCanvas'
 import { EditorToolbar } from '../components/layout-editor/EditorToolbar'
 import { SetupWizard } from '../components/layout-editor/SetupWizard'
@@ -13,8 +11,8 @@ import { mockService } from '../services/mockData'
 import { useLayoutEditorStore } from '../stores/layoutEditorStore'
 import { useLayoutStore } from '../stores/layoutStore'
 import { useDataTableStore } from '../stores/dataTableStore'
-import type { Equipment, CustomColumnDef } from '../types'
-import type { OhtRailSegment } from '../stores/layoutStore'
+import type { CustomColumnDef } from '../types'
+import type { LayoutItem, OhtRailSegment } from '../stores/layoutStore'
 
 type OhtRailWithLabel = OhtRailSegment & { label?: string }
 
@@ -22,20 +20,18 @@ export const LayoutEditorPage: React.FC = () => {
   const { id } = useParams<{ id?: string }>()
   const navigate = useNavigate()
   const containerRef = useRef<HTMLDivElement>(null)
-  const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 })
-  const [_dragEquipment, _setDragEquipment] = useState<Equipment | null>(null)
-
-  const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 })
   const [showProperties, setShowProperties] = useState(false)
   const [editingItems, setEditingItems] = useState<{ id: string; label: string }[]>([])
+
+  // 취소 시 복원을 위한 레이아웃 스냅샷 (편집 진입 시 저장)
+  const layoutSnapshotRef = useRef<LayoutItem | null>(null)
 
   const { setIsDirty, setHighlightedZoneId, setHighlightedRailId } = useLayoutEditorStore()
   const { layouts, updateLayout } = useLayoutStore()
   const { tables: dataTables, addTable, updateTable } = useDataTableStore()
 
   const layout = id ? layouts.find(l => l.id === id) : null
-  // 초기 미완료 또는 사용자가 재편집 요청 시 SetupWizard 표시
-  const isSetupMode = layout && (!layout.isSetupComplete || showSetupWizard)
 
   const { data: equipment = [], isLoading: eqLoading } = useQuery({
     queryKey: ['equipment'],
@@ -45,12 +41,23 @@ export const LayoutEditorPage: React.FC = () => {
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    // 초기 크기 즉시 설정 (첫 렌더링 시 0으로 fit 차단 → 실제 크기 확정 후 fit 실행)
+    setCanvasSize({ w: el.clientWidth, h: el.clientHeight - 40 })
     const ro = new ResizeObserver(() => {
       setCanvasSize({ w: el.clientWidth, h: el.clientHeight - 40 })
     })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // 편집 화면 진입 시 스냅샷 저장 (취소 시 복원용)
+  useEffect(() => {
+    if (layout && !layoutSnapshotRef.current) {
+      layoutSnapshotRef.current = JSON.parse(JSON.stringify(layout)) as LayoutItem
+    }
+  // layout.id 변경 시 스냅샷 초기화
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout?.id])
 
   // 편집 화면 진입 시 기존 배치영역/OHT레일 데이터를 데이터 관리에 동기화
   // [사내망 이관 시 교체] 데이터 관리 테이블 저장 실제 API로 교체 필요
@@ -140,21 +147,26 @@ export const LayoutEditorPage: React.FC = () => {
     }
   }
 
-  // 11단계 설정 완료 처리
+  // 편집 완료 처리 → 항상 보기 화면으로 이동
   const handleSetupComplete = () => {
     if (!id) return
-    if (showSetupWizard) {
-      // 재편집 완료 → 편집 모드 유지
-      updateLayout(id, { isSetupComplete: true })
-      setShowSetupWizard(false)
-      toast.success('초기 설정이 수정되었습니다.')
-    } else {
-      // 최초 설정 완료 → 보기 화면으로 이동
-      updateLayout(id, { isSetupComplete: true, setupStep: 11 })
-      toast.success('초기 설정이 완료되었습니다!')
-      navigate(`/layout/${id}`)
-    }
+    updateLayout(id, { isSetupComplete: true, setupStep: 11 })
+    layoutSnapshotRef.current = null
+    setIsDirty(false)
+    toast.success('편집이 완료되었습니다.')
+    navigate(`/layout/${id}`)
   }
+
+  // 보기로 전환 (이미 설정 완료된 레이아웃에서 편집 취소)
+  // 스냅샷이 있으면 스냅샷으로 복원 후 이동
+  const handleCancelEdit = useCallback(() => {
+    if (id && layoutSnapshotRef.current) {
+      updateLayout(id, layoutSnapshotRef.current)
+      layoutSnapshotRef.current = null
+    }
+    setIsDirty(false)
+    navigate(`/layout/${id}`)
+  }, [id, navigate, updateLayout, setIsDirty])
 
   if (eqLoading) {
     return (
@@ -187,15 +199,17 @@ export const LayoutEditorPage: React.FC = () => {
           {layout && (
             <div className="flex items-center gap-2 px-3 border-l border-gray-200">
               <span className="text-sm font-semibold text-gray-700">{layout.name}</span>
-              {layout.isSetupComplete && !showSetupWizard && (
+              {layout.isSetupComplete && (
                 <>
+                  {/* 변경사항 취소: 스냅샷으로 복원 후 보기 화면으로 이동 */}
                   <button
-                    onClick={() => setShowSetupWizard(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-600 border border-amber-200 hover:bg-amber-50 transition-colors"
+                    onClick={handleCancelEdit}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-500 border border-red-200 hover:bg-red-50 transition-colors"
                   >
-                    <Settings2 size={12} />
-                    초기설정 수정
+                    <X size={12} />
+                    변경사항 취소
                   </button>
+                  {/* 보기로 전환: 변경사항 유지하며 보기 화면으로 이동 */}
                   <button
                     onClick={() => navigate(`/layout/${id}`)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-500 border border-gray-200 hover:bg-gray-50 transition-colors"
@@ -205,36 +219,24 @@ export const LayoutEditorPage: React.FC = () => {
                   </button>
                 </>
               )}
-              {showSetupWizard && (
-                <button
-                  onClick={() => setShowSetupWizard(false)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-500 border border-red-200 hover:bg-red-50 transition-colors"
-                >
-                  <X size={12} />
-                  설정 수정 취소
-                </button>
-              )}
             </div>
           )}
         </div>
 
-        {/* 3-Panel Layout */}
+        {/* 2-Panel Layout: 편집(SetupWizard) + Canvas */}
         <div className="flex flex-1 overflow-hidden">
-          {/* 초기 설정 모드: 왼쪽에 설정 위자드 */}
-          {isSetupMode ? (
+          {/* 편집 모드: 항상 설정 위자드 표시 */}
+          {layout && (
             <SetupWizard
               layout={layout}
-              onUpdate={(updates) => id && updateLayout(id, updates)}
+              onUpdate={(updates) => {
+                if (id) {
+                  updateLayout(id, updates)
+                  setIsDirty(true)
+                }
+              }}
               onComplete={handleSetupComplete}
             />
-          ) : (
-            /* 일반 편집 모드: 레이어 패널 */
-            <div style={{ width: 200, minWidth: 200 }} className="flex flex-col overflow-hidden border-r border-gray-200">
-              <LayerPanel
-                equipment={equipment}
-                onDragEquipment={(eq) => _setDragEquipment(eq)}
-              />
-            </div>
           )}
 
           {/* Center: Canvas */}
@@ -257,13 +259,6 @@ export const LayoutEditorPage: React.FC = () => {
               }}
             />
           </div>
-
-          {/* Right: Properties (일반 편집 모드에서만) */}
-          {!isSetupMode && (
-            <div style={{ width: 280, minWidth: 280 }} className="flex flex-col overflow-hidden border-l border-gray-200">
-              <PropertiesPanel equipment={equipment} />
-            </div>
-          )}
         </div>
       </div>
       {/* 속성 모달 — 단계별 목록 및 명칭 일괄 편집 */}

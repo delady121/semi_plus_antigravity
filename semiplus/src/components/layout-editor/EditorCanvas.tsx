@@ -129,7 +129,8 @@ export const EditorCanvas: React.FC<Props> = ({
     const inRect = (cx: number, cy: number) => cx >= x && cx <= x + rw && cy >= y && cy <= y + rh
     if (clickableLayer === 'equipment') {
       const placementIds = placements.filter(p => inRect(p.x, p.y)).map(p => p.equipment_id)
-      const genIds = generatedEquipments.filter(eq => inRect(eq.x + eq.width / 2, eq.y + eq.height / 2)).map(eq => eq.id)
+      // Y축 반전: 설비 중심 화면 Y = CH - dataY - height/2
+      const genIds = generatedEquipments.filter(eq => inRect(eq.x + eq.width / 2, CH - eq.y - eq.height / 2)).map(eq => eq.id)
       setSelectedEquipmentIds([...placementIds, ...genIds])
       setSelectedZoneId(null)
       setSelectedRailId(null)
@@ -152,7 +153,8 @@ export const EditorCanvas: React.FC<Props> = ({
       setSelectedZoneId(null)
       setSelectedFacilityId(null)
     } else if (clickableLayer === 'facility') {
-      const hit = generatedFacilities.find(f => inRect(f.x + f.width / 2, f.y + f.height / 2))
+      // Y축 반전: 시설물 중심 화면 Y = CH - dataY - height/2
+      const hit = generatedFacilities.find(f => inRect(f.x + f.width / 2, CH - f.y - f.height / 2))
       setSelectedFacilityId(hit?.id ?? null)
       setSelectedEquipmentIds([])
       setSelectedZoneId(null)
@@ -191,20 +193,55 @@ export const EditorCanvas: React.FC<Props> = ({
     return pos
   }, [snapEnabled, snapTargets, zoomLevel])
 
-  // 배경 이미지 로드
+  // 배경 이미지 로드 또는 직접 크기 설정 적용
   useEffect(() => {
-    if (!layout?.backgroundImageData) { setBgImage(null); return }
+    if (!layout?.backgroundImageData) {
+      setBgImage(null)
+      // 방식 B: 이미지 없음 — 직접 설정한 크기 사용
+      if (layout?.canvasWidth && layout?.canvasHeight) {
+        setCanvasNativeSize({ w: layout.canvasWidth, h: layout.canvasHeight })
+      }
+      return
+    }
     const img = new window.Image()
     img.onload = () => {
       setBgImage(img)
       setCanvasNativeSize({ w: img.naturalWidth, h: img.naturalHeight })
     }
     img.src = layout.backgroundImageData
-  }, [layout?.backgroundImageData])
+  }, [layout?.backgroundImageData, layout?.canvasWidth, layout?.canvasHeight])
 
   const gridPx = layout?.scaleMmPerPx ? layout.gridSizeMm / layout.scaleMmPerPx : 60
   const CW = canvasNativeSize.w
   const CH = canvasNativeSize.h
+
+  // 레이아웃 최초 진입 시 전체 영역이 화면에 꽉 차도록 자동 줌/오프셋 조정
+  // key = layoutId_CW_CH 로 추적 → 실제 사이즈 확정 후 1회만 fit
+  const fittedKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!containerWidth || !containerHeight || !CW || !CH) return
+    const layoutId = layout?.id ?? null
+    const hasSource =
+      !!layout?.backgroundImageData ||
+      (!!layout?.canvasWidth && !!layout?.canvasHeight)
+    // 이미지 소스가 있는데 아직 기본 사이즈 → 이미지 로드 대기
+    if (layout?.backgroundImageData && CW === DEFAULT_CANVAS_W && CH === DEFAULT_CANVAS_H) return
+    // 배경 소스가 없는 레이아웃은 진행하지 않음
+    if (layoutId !== null && !hasSource) return
+    // layoutId + 실제 CW/CH 조합으로 중복 실행 방지
+    const key = `${layoutId}_${CW}_${CH}`
+    if (fittedKeyRef.current === key) return
+    fittedKeyRef.current = key
+    const padding = 40
+    const fitZoom = Math.min(
+      (containerWidth - padding * 2) / CW,
+      (containerHeight - padding * 2) / CH,
+    )
+    const offsetX = (containerWidth - CW * fitZoom) / 2
+    const offsetY = (containerHeight - CH * fitZoom) / 2
+    setZoomLevel(fitZoom)
+    setCanvasOffset({ x: offsetX, y: offsetY })
+  }, [layout?.id, layout?.backgroundImageData, layout?.canvasWidth, layout?.canvasHeight, CW, CH, containerWidth, containerHeight, setZoomLevel, setCanvasOffset])
 
   // ── 배치영역/OHT 이력 관리 ──────────────────────────────────
 
@@ -313,13 +350,41 @@ export const EditorCanvas: React.FC<Props> = ({
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
+    const oldZoom = zoomLevel
     const delta = e.evt.deltaY > 0 ? -0.1 : 0.1
-    setZoomLevel(zoomLevel + delta)
-  }, [zoomLevel, setZoomLevel])
+    const newZoom = Math.min(4.0, Math.max(0.1, oldZoom + delta))
+
+    // 마우스 커서 기준 줌: 커서 아래 캔버스 좌표가 줌 후에도 동일 위치에 유지
+    const pointer = stageRef.current?.getPointerPosition()
+    if (!pointer) {
+      setZoomLevel(newZoom)
+      return
+    }
+    // 현재 커서가 가리키는 캔버스 데이터 좌표
+    const canvasDataX = (pointer.x - canvasOffset.x) / oldZoom
+    const canvasDataY = (pointer.y - canvasOffset.y) / oldZoom
+    // 새 줌에서 같은 데이터 좌표가 커서 위치에 오도록 오프셋 계산
+    const newOffsetX = pointer.x - canvasDataX * newZoom
+    const newOffsetY = pointer.y - canvasDataY * newZoom
+    // 이동 범위 제한 (newZoom 기준으로 재계산, 빈 공간 없음 기준)
+    const scaledW = CW * newZoom
+    const scaledH = CH * newZoom
+    const minX = Math.min(0, containerWidth - scaledW)
+    const maxX = Math.max(0, containerWidth - scaledW)
+    const minY = Math.min(0, containerHeight - scaledH)
+    const maxY = Math.max(0, containerHeight - scaledH)
+    const clampedX = Math.max(minX, Math.min(maxX, newOffsetX))
+    const clampedY = Math.max(minY, Math.min(maxY, newOffsetY))
+
+    setZoomLevel(newZoom)
+    setCanvasOffset({ x: clampedX, y: clampedY })
+  }, [zoomLevel, canvasOffset, CW, CH, containerWidth, containerHeight, setZoomLevel, setCanvasOffset])
 
   const handleStageDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (e.target === stageRef.current) {
-      setCanvasOffset({ x: e.target.x(), y: e.target.y() })
+      const clamped = clampOffset({ x: e.target.x(), y: e.target.y() })
+      e.target.position(clamped)
+      setCanvasOffset(clamped)
     }
   }
 
@@ -436,22 +501,29 @@ export const EditorCanvas: React.FC<Props> = ({
   }
 
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    // 우클릭 패닝
+    // 우클릭 패닝 (이동 범위 제한 적용)
     if (isPanningRef.current && panClientStartRef.current && panOffsetStartRef.current) {
       const dx = e.evt.clientX - panClientStartRef.current.x
       const dy = e.evt.clientY - panClientStartRef.current.y
       const container = stageRef.current?.container()
       if (container) container.style.cursor = 'grabbing'
-      setCanvasOffset({ x: panOffsetStartRef.current.x + dx, y: panOffsetStartRef.current.y + dy })
+      const newOffset = { x: panOffsetStartRef.current.x + dx, y: panOffsetStartRef.current.y + dy }
+      setCanvasOffset(clampOffset(newOffset))
       return
     }
 
     const rawPos = stageRef.current?.getPointerPosition()
     if (rawPos) {
-      setMousePos({
-        x: Math.round((rawPos.x - canvasOffset.x) / zoomLevel * 10),
-        y: Math.round((rawPos.y - canvasOffset.y) / zoomLevel * 10),
-      })
+      const pxX = (rawPos.x - canvasOffset.x) / zoomLevel
+      const pxY = (rawPos.y - canvasOffset.y) / zoomLevel
+      // Y축 반전: 화면 상단=0 → FAB 하단=0 으로 변환 (좌하단이 원점)
+      const fabPxY = CH - pxY
+      const scaleMmPerPx = layout?.scaleMmPerPx
+      setMousePos(
+        scaleMmPerPx
+          ? { x: Math.round(pxX * scaleMmPerPx), y: Math.round(fabPxY * scaleMmPerPx) }
+          : { x: Math.round(pxX), y: Math.round(fabPxY) },
+      )
     }
     const pos = getCanvasPos()
     if (!pos) return
@@ -634,12 +706,15 @@ export const EditorCanvas: React.FC<Props> = ({
   }
 
   // 데이터 기반 생성 설비 드래그 이동 완료 — store 및 데이터 테이블 좌표 업데이트
+  // Y축 반전: 화면 Y → 데이터 Y 역변환 (newDataY = CH - screenY - height)
   const handleGenEquipDragEnd = (eq: { id: string; label: string; x: number; y: number; width: number; height: number }, e: Konva.KonvaEventObject<DragEvent>) => {
     const effectiveGrid = (gridPx > 0 && isFinite(gridPx)) ? gridPx : 1
     const newX = Math.round(e.target.x() / effectiveGrid) * effectiveGrid
-    const newY = Math.round(e.target.y() / effectiveGrid) * effectiveGrid
-    if (!isFinite(newX) || !isFinite(newY)) return
-    updateGeneratedEquipment(eq.id, { x: newX, y: newY })
+    const newScreenY = Math.round(e.target.y() / effectiveGrid) * effectiveGrid
+    // 화면 Y → 데이터 Y 역변환
+    const newDataY = CH - newScreenY - eq.height
+    if (!isFinite(newX) || !isFinite(newDataY)) return
+    updateGeneratedEquipment(eq.id, { x: newX, y: newDataY })
     // [사내망 이관 시 교체] 설비 좌표 업데이트 실제 API로 교체 필요
     const cfg = layout?.equipmentLayerConfig
     if (cfg?.tableId) {
@@ -653,8 +728,8 @@ export const EditorCanvas: React.FC<Props> = ({
             ...row,
             [cfg.xminField]: newX,
             [cfg.xmaxField]: newX + eq.width,
-            [cfg.yminField]: newY,
-            [cfg.ymaxField]: newY + eq.height,
+            [cfg.yminField]: newDataY,
+            [cfg.ymaxField]: newDataY + eq.height,
           }
         })
         updateTable(cfg.tableId, { rows: updatedRows })
@@ -791,6 +866,22 @@ export const EditorCanvas: React.FC<Props> = ({
   const W = containerWidth
   const H = containerHeight
 
+  // 도면 이동 범위 제한 — 기본 영역(캔버스) 밖으로 빈 공간이 보이지 않도록 클램프
+  // 캔버스 > 뷰포트: 캔버스 엣지가 뷰포트 안으로 들어오지 않도록
+  // 캔버스 < 뷰포트: 좌상단~우하단 범위 내에서 자유롭게 이동 허용
+  const clampOffset = useCallback((offset: { x: number; y: number }) => {
+    const scaledW = CW * zoomLevel
+    const scaledH = CH * zoomLevel
+    const minX = Math.min(0, containerWidth - scaledW)
+    const maxX = Math.max(0, containerWidth - scaledW)
+    const minY = Math.min(0, containerHeight - scaledH)
+    const maxY = Math.max(0, containerHeight - scaledH)
+    return {
+      x: Math.max(minX, Math.min(maxX, offset.x)),
+      y: Math.max(minY, Math.min(maxY, offset.y)),
+    }
+  }, [CW, CH, zoomLevel, containerWidth, containerHeight])
+
   const canEdit = !readonly && toolMode === 'select'
 
   return (
@@ -817,16 +908,13 @@ export const EditorCanvas: React.FC<Props> = ({
         onMouseMove={handleMouseMove}
         onContextMenu={handleContextMenu}
       >
-        {/* L1: 배경 이미지 또는 기본 배경 */}
+        {/* L1: 배경 이미지 또는 기본 영역 */}
         {isLayerVisible('L1') && (
           <Layer listening={false}>
             {bgImage ? (
               <KonvaImage image={bgImage} x={0} y={0} width={CW} height={CH} />
             ) : (
-              <>
-                <Rect x={0} y={0} width={CW} height={CH} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={2} />
-                <Text x={10} y={10} text="배경 이미지를 업로드하세요" fontSize={14} fill="#94a3b8" />
-              </>
+              <Rect x={0} y={0} width={CW} height={CH} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={2} />
             )}
           </Layer>
         )}
@@ -1024,15 +1112,16 @@ export const EditorCanvas: React.FC<Props> = ({
           </Layer>
         )}
 
-        {/* L5-FAC: 시설물 레이어 데이터 기반 생성 시설물 */}
+        {/* L5-FAC: 시설물 레이어 데이터 기반 생성 시설물 (Y축 반전: 하단=0, 상단 증가) */}
         {isLayerVisible('L5') && generatedFacilities.length > 0 && (
           <Layer>
             {generatedFacilities.map(fac => {
               const isFacSelected = selectedFacilityId === fac.id
+              const facScreenY = CH - fac.y - fac.height
               return (
                 <React.Fragment key={fac.id}>
                   <Rect
-                    x={fac.x} y={fac.y}
+                    x={fac.x} y={facScreenY}
                     width={fac.width} height={fac.height}
                     fill={isFacSelected ? '#94a3b840' : '#64748b30'}
                     stroke={isFacSelected ? '#475569' : '#64748b'}
@@ -1044,7 +1133,7 @@ export const EditorCanvas: React.FC<Props> = ({
                     shadowBlur={isFacSelected ? 6 : 0}
                   />
                   <Text
-                    x={fac.x + 3} y={fac.y + 3}
+                    x={fac.x + 3} y={facScreenY + 3}
                     width={fac.width - 6}
                     text={fac.label}
                     fontSize={9}
@@ -1057,15 +1146,16 @@ export const EditorCanvas: React.FC<Props> = ({
           </Layer>
         )}
 
-        {/* L5-GEN: 설비 레이어 데이터 기반 생성 설비 */}
+        {/* L5-GEN: 설비 레이어 데이터 기반 생성 설비 (Y축 반전: 하단=0, 상단 증가) */}
         {isLayerVisible('L5') && generatedEquipments.length > 0 && (
           <Layer>
             {generatedEquipments.map(eq => {
               const isGenSelected = selectedEquipmentIds.includes(eq.id)
+              const eqScreenY = CH - eq.y - eq.height
               return (
                 <Group
                   key={eq.id}
-                  x={eq.x} y={eq.y}
+                  x={eq.x} y={eqScreenY}
                   draggable={!readonly && !isLayerLocked('L5')}
                   onDragEnd={e => handleGenEquipDragEnd(eq, e)}
                   onClick={e => {
@@ -1208,7 +1298,11 @@ export const EditorCanvas: React.FC<Props> = ({
       <div className="absolute bottom-0 left-0 right-0 h-8 bg-slate-800 bg-opacity-90 flex items-center px-3 gap-4 text-xs text-slate-300 pointer-events-none">
         <span>줌: {Math.round(zoomLevel * 100)}%</span>
         <span>|</span>
-        <span>X: {mousePos.x}mm Y: {mousePos.y}mm</span>
+        {layout?.scaleMmPerPx ? (
+          <span>X: {mousePos.x}mm Y: {mousePos.y}mm</span>
+        ) : (
+          <span className="text-slate-500">X: {mousePos.x}px Y: {mousePos.y}px (축척 미설정)</span>
+        )}
         <span>|</span>
         <span>선택: {selectedEquipmentIds.length}개</span>
         <span>|</span>
